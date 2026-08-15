@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36327.8 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LPR381Solver", "LPR381Solver\LPR381Solver.csproj", "{09D054EE-8B11-40CF-9B40-34A1B1CD44D8}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{09D054EE-8B11-40CF-9B40-34A1B1CD44D8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{09D054EE-8B11-40CF-9B40-34A1B1CD44D8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{09D054EE-8B11-40CF-9B40-34A1B1CD44D8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{09D054EE-8B11-40CF-9B40-34A1B1CD44D8}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {490D6860-83FF-4D1C-8BBD-BE5FBBFEA211}
+	EndGlobalSection
+EndGlobal
