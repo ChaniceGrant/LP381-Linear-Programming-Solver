@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using LPR381Solver.Models;
@@ -8,7 +9,12 @@ namespace LPR381Solver.Services
 {
     public class PrimalSimplexSolver
     {
-        public enum SolutionStatus { Optimal, Unbounded, Infeasible }
+        public enum SolutionStatus
+        {
+            Optimal,
+            Unbounded,
+            Infeasible
+        }
 
         public class Result
         {
@@ -18,196 +24,700 @@ namespace LPR381Solver.Services
             public string ExecutionLog { get; set; } = string.Empty;
         }
 
+        private const double EPSILON = 1e-9;
+        private const int MAX_ITERATIONS = 1000;
+
         public Result Solve(CanonicalProblem canonical)
         {
+            if (canonical == null)
+            {
+                throw new ArgumentNullException(nameof(canonical));
+            }
+
             var log = new StringBuilder();
+
             log.AppendLine("=== CANONICAL FORM ===");
             log.AppendLine(FormatCanonicalText(canonical));
 
-            double[,] T = (double[,])canonical.TableauMatrix.Clone();
+            double[,] tableau =
+                (double[,])canonical.TableauMatrix.Clone();
+
             int m = canonical.NumConstraints;
             int n = canonical.NumVarsTotal;
-            var basis = new List<int>(canonical.BasicVariables);
 
-            // Phase 1 check if artificial variables exist
+            var basis =
+                new List<int>(canonical.BasicVariables);
+
+            // ============================================================
+            // PHASE 1
+            // ============================================================
+
             if (canonical.ArtificialVarIndices.Count > 0)
             {
-                log.AppendLine("\n=== PHASE 1: FIND FEASIBLE BASIS ===");
-                // Construct Phase 1 Row 0: Min sum(Artificials)
-                double[,] phase1T = (double[,])T.Clone();
-                for (int j = 0; j <= n; j++) phase1T[0, j] = 0;
+                log.AppendLine();
+                log.AppendLine("=== PHASE 1: FIND FEASIBLE BASIS ===");
 
-                foreach (int artIdx in canonical.ArtificialVarIndices)
+                double[,] phase1 =
+                    (double[,])tableau.Clone();
+
+                // Start Phase 1 objective row at zero.
+                for (int j = 0; j <= n; j++)
                 {
-                    int row = basis.IndexOf(artIdx) + 1;
-                    if (row > 0)
+                    phase1[0, j] = 0.0;
+                }
+
+                /*
+                 * Phase 1 maximises:
+                 *
+                 *       -W = -(a1 + a2 + ...)
+                 *
+                 * Therefore artificial variables initially have
+                 * coefficient +1 in the tableau objective row.
+                 */
+                foreach (int artificialIndex in canonical.ArtificialVarIndices)
+                {
+                    phase1[0, artificialIndex] = 1.0;
+                }
+
+                /*
+                 * Artificial variables are initially basic.
+                 *
+                 * Remove their coefficients from the objective row.
+                 */
+                for (int i = 0; i < m; i++)
+                {
+                    int basicVariable = basis[i];
+
+                    if (!canonical.ArtificialVarIndices.Contains(basicVariable))
                     {
-                        for (int j = 0; j <= n; j++) phase1T[0, j] -= T[row, j];
+                        continue;
+                    }
+
+                    double factor = phase1[0, basicVariable];
+
+                    if (Math.Abs(factor) > EPSILON)
+                    {
+                        for (int j = 0; j <= n; j++)
+                        {
+                            phase1[0, j] -=
+                                factor * phase1[i + 1, j];
+                        }
                     }
                 }
 
-                var p1Result = RunSimplexLoop(phase1T, basis, m, n, canonical.VariableNames, log);
-                if (p1Result == SolutionStatus.Unbounded || Math.Abs(phase1T[0, n]) > 1e-4)
+                SolutionStatus phase1Status =
+                    RunSimplexLoop(
+                        phase1,
+                        basis,
+                        m,
+                        n,
+                        canonical.VariableNames,
+                        log);
+
+                /*
+                 * Phase 1 objective is -W.
+                 *
+                 * If W = 0, the objective is 0.
+                 *
+                 * If W > 0, the objective is negative.
+                 */
+                double phase1Objective = phase1[0, n];
+
+                if (phase1Status == SolutionStatus.Unbounded)
                 {
-                    log.AppendLine("\n[RESULT] Model is INFEASIBLE (Artificial variables cannot be driven to zero).");
-                    return new Result { Status = SolutionStatus.Infeasible, ExecutionLog = log.ToString() };
+                    log.AppendLine();
+                    log.AppendLine(
+                        "[RESULT] Model is INFEASIBLE.");
+
+                    return new Result
+                    {
+                        Status = SolutionStatus.Infeasible,
+                        ExecutionLog = log.ToString()
+                    };
                 }
 
-                // Copy solved basis matrix to main tableau & reconstruct original Row 0
-                T = phase1T;
-                log.AppendLine("\n=== PHASE 2: OPTIMIZE OBJECTIVE ===");
-                ReconstructRowZero(T, canonical, basis, m, n);
+                if (phase1Objective < -1e-7)
+                {
+                    log.AppendLine();
+                    log.AppendLine(
+                        "[RESULT] Model is INFEASIBLE " +
+                        "(artificial variables cannot be driven to zero).");
+
+                    return new Result
+                    {
+                        Status = SolutionStatus.Infeasible,
+                        ExecutionLog = log.ToString()
+                    };
+                }
+
+                // Phase 1 succeeded.
+                tableau = phase1;
+
+                log.AppendLine();
+                log.AppendLine("=== PHASE 2: OPTIMIZE OBJECTIVE ===");
+
+                ReconstructRowZero(
+                    tableau,
+                    canonical,
+                    basis,
+                    m,
+                    n);
             }
             else
             {
-                log.AppendLine("\n=== PRIMAL SIMPLEX ITERATIONS ===");
+                log.AppendLine();
+                log.AppendLine("=== PRIMAL SIMPLEX ITERATIONS ===");
             }
 
-            var status = RunSimplexLoop(T, basis, m, n, canonical.VariableNames, log);
+            // ============================================================
+            // PHASE 2
+            // ============================================================
+
+            SolutionStatus status =
+                RunSimplexLoop(
+                    tableau,
+                    basis,
+                    m,
+                    n,
+                    canonical.VariableNames,
+                    log);
 
             if (status == SolutionStatus.Unbounded)
             {
-                log.AppendLine("\n[RESULT] Model is UNBOUNDED.");
-                return new Result { Status = SolutionStatus.Unbounded, ExecutionLog = log.ToString() };
+                log.AppendLine();
+                log.AppendLine("[RESULT] Model is UNBOUNDED.");
+
+                return new Result
+                {
+                    Status = SolutionStatus.Unbounded,
+                    ExecutionLog = log.ToString()
+                };
             }
 
-            // Extract Solution
-            double[] sol = new double[canonical.Original.NumVariables];
+            // ============================================================
+            // EXTRACT SOLUTION
+            // ============================================================
+
+            double[] solution =
+                new double[canonical.Original.NumVariables];
+
             for (int i = 0; i < m; i++)
             {
-                if (basis[i] < canonical.Original.NumVariables)
-                    sol[basis[i]] = T[i + 1, n];
+                int basicVariable = basis[i];
+
+                if (basicVariable >= 0 &&
+                    basicVariable < canonical.Original.NumVariables)
+                {
+                    solution[basicVariable] =
+                        tableau[i + 1, n];
+                }
             }
 
-            double zVal = T[0, n];
-            if (!canonical.Original.IsMaximization) zVal = -zVal;
+            double objectiveValue =
+                tableau[0, n];
 
-            log.AppendLine($"\n[RESULT] OPTIMAL SOLUTION FOUND");
-            log.AppendLine($"Objective Value (z) = {zVal:F3}");
+            if (!canonical.Original.IsMaximization)
+            {
+                objectiveValue = -objectiveValue;
+            }
+
+            log.AppendLine();
+            log.AppendLine("[RESULT] OPTIMAL SOLUTION FOUND");
+
+            log.AppendLine(
+                "Objective Value (z) = " +
+                objectiveValue.ToString(
+                    "F3",
+                    CultureInfo.InvariantCulture));
+
+            log.AppendLine("Variable Values:");
+
+            for (int i = 0; i < solution.Length; i++)
+            {
+                log.AppendLine(
+                    "  x" +
+                    (i + 1) +
+                    " = " +
+                    solution[i].ToString(
+                        "F3",
+                        CultureInfo.InvariantCulture));
+            }
 
             return new Result
             {
                 Status = SolutionStatus.Optimal,
-                ObjectiveValue = zVal,
-                VariableValues = sol,
+                ObjectiveValue = objectiveValue,
+                VariableValues = solution,
                 ExecutionLog = log.ToString()
             };
         }
 
-        private SolutionStatus RunSimplexLoop(double[,] T, List<int> basis, int m, int n, List<string> varNames, StringBuilder log)
+        // ================================================================
+        // SIMPLEX LOOP
+        // ================================================================
+
+        private SolutionStatus RunSimplexLoop(
+            double[,] tableau,
+            List<int> basis,
+            int m,
+            int n,
+            List<string> variableNames,
+            StringBuilder log)
         {
             int iteration = 0;
+
             while (true)
             {
-                log.AppendLine($"\n--- Iteration {iteration} ---");
-                log.AppendLine(FormatTableau(T, basis, m, n, varNames));
+                if (iteration >= MAX_ITERATIONS)
+                {
+                    log.AppendLine();
+                    log.AppendLine(
+                        "[ERROR] Maximum simplex iterations reached.");
 
-                // 1. Pivot Column (Most negative entry in Row 0)
-                int pivotCol = -1;
-                double minVal = -1e-6;
+                    return SolutionStatus.Unbounded;
+                }
+
+                log.AppendLine();
+                log.AppendLine(
+                    "--- Iteration " +
+                    iteration +
+                    " ---");
+
+                log.AppendLine(
+                    FormatTableau(
+                        tableau,
+                        basis,
+                        m,
+                        n,
+                        variableNames));
+
+                // --------------------------------------------------------
+                // Select entering variable.
+                // --------------------------------------------------------
+
+                int pivotColumn = -1;
+                double mostNegative = -EPSILON;
+
                 for (int j = 0; j < n; j++)
                 {
-                    if (T[0, j] < minVal)
+                    if (tableau[0, j] < mostNegative)
                     {
-                        minVal = T[0, j];
-                        pivotCol = j;
+                        mostNegative = tableau[0, j];
+                        pivotColumn = j;
                     }
                 }
 
-                if (pivotCol == -1) return SolutionStatus.Optimal; // Optimal state reached
+                // No negative reduced cost = optimal.
+                if (pivotColumn == -1)
+                {
+                    return SolutionStatus.Optimal;
+                }
 
-                // 2. Pivot Row (Minimum Positive Ratio Test)
+                // --------------------------------------------------------
+                // Select leaving variable.
+                // --------------------------------------------------------
+
                 int pivotRow = -1;
-                double minRatio = double.MaxValue;
+                double minimumRatio =
+                    double.PositiveInfinity;
+
                 for (int i = 1; i <= m; i++)
                 {
-                    if (T[i, pivotCol] > 1e-7)
+                    double coefficient =
+                        tableau[i, pivotColumn];
+
+                    if (coefficient > EPSILON)
                     {
-                        double ratio = T[i, n] / T[i, pivotCol];
-                        if (ratio < minRatio)
+                        double rhs =
+                            tableau[i, n];
+
+                        double ratio =
+                            rhs / coefficient;
+
+                        if (ratio >= -EPSILON &&
+                            ratio < minimumRatio)
                         {
-                            minRatio = ratio;
+                            minimumRatio = ratio;
                             pivotRow = i;
                         }
                     }
                 }
 
-                if (pivotRow == -1) return SolutionStatus.Unbounded; // No positive entries in column
+                // No valid leaving variable = unbounded.
+                if (pivotRow == -1)
+                {
+                    log.AppendLine();
+                    log.AppendLine(
+                        "Entering variable: " +
+                        variableNames[pivotColumn]);
 
-                log.AppendLine($"Entering: {varNames[pivotCol]} | Leaving: {varNames[basis[pivotRow - 1]]}");
+                    return SolutionStatus.Unbounded;
+                }
 
-                // 3. Perform Pivot Operation
-                basis[pivotRow - 1] = pivotCol;
-                double pivotVal = T[pivotRow, pivotCol];
+                log.AppendLine(
+                    "Entering: " +
+                    variableNames[pivotColumn] +
+                    " | Leaving: " +
+                    variableNames[basis[pivotRow - 1]]);
 
-                for (int j = 0; j <= n; j++) T[pivotRow, j] /= pivotVal;
+                // --------------------------------------------------------
+                // Pivot.
+                // --------------------------------------------------------
 
+                double pivotValue =
+                    tableau[pivotRow, pivotColumn];
+
+                if (Math.Abs(pivotValue) < EPSILON)
+                {
+                    return SolutionStatus.Unbounded;
+                }
+
+                basis[pivotRow - 1] =
+                    pivotColumn;
+
+                // Divide pivot row by pivot value.
+                for (int j = 0; j <= n; j++)
+                {
+                    tableau[pivotRow, j] /=
+                        pivotValue;
+                }
+
+                // Eliminate pivot column from all other rows.
                 for (int i = 0; i <= m; i++)
                 {
-                    if (i != pivotRow)
+                    if (i == pivotRow)
                     {
-                        double factor = T[i, pivotCol];
-                        for (int j = 0; j <= n; j++) T[i, j] -= factor * T[pivotRow, j];
+                        continue;
+                    }
+
+                    double factor =
+                        tableau[i, pivotColumn];
+
+                    if (Math.Abs(factor) < EPSILON)
+                    {
+                        continue;
+                    }
+
+                    for (int j = 0; j <= n; j++)
+                    {
+                        tableau[i, j] -=
+                            factor *
+                            tableau[pivotRow, j];
                     }
                 }
+
+                CleanTableau(
+                    tableau,
+                    m,
+                    n);
 
                 iteration++;
             }
         }
 
-        private void ReconstructRowZero(double[,] T, CanonicalProblem c, List<int> basis, int m, int n)
-        {
-            for (int j = 0; j <= n; j++)
-                T[0, j] = j < c.Original.NumVariables ? (c.Original.IsMaximization ? -c.Original.ObjectiveCoeffs[j] : c.Original.ObjectiveCoeffs[j]) : 0;
+        // ================================================================
+        // REBUILD OBJECTIVE ROW FOR PHASE 2
+        // ================================================================
 
+        private void ReconstructRowZero(
+            double[,] tableau,
+            CanonicalProblem canonical,
+            List<int> basis,
+            int m,
+            int n)
+        {
+            // Clear objective row.
+            for (int j = 0; j <= n; j++)
+            {
+                tableau[0, j] = 0.0;
+            }
+
+            // Original objective coefficients.
+            for (int j = 0;
+                 j < canonical.Original.NumVariables;
+                 j++)
+            {
+                if (canonical.Original.IsMaximization)
+                {
+                    tableau[0, j] =
+                        -canonical.Original.ObjectiveCoeffs[j];
+                }
+                else
+                {
+                    tableau[0, j] =
+                        canonical.Original.ObjectiveCoeffs[j];
+                }
+            }
+
+            tableau[0, n] = 0.0;
+
+            /*
+             * Eliminate all basic-variable coefficients from Row 0.
+             */
             for (int i = 0; i < m; i++)
             {
-                int bVar = basis[i];
-                double factor = T[0, bVar];
-                if (Math.Abs(factor) > 1e-7)
+                int basicVariable =
+                    basis[i];
+
+                if (basicVariable < 0 ||
+                    basicVariable >= n)
                 {
-                    for (int j = 0; j <= n; j++) T[0, j] -= factor * T[i + 1, j];
+                    continue;
+                }
+
+                double factor =
+                    tableau[0, basicVariable];
+
+                if (Math.Abs(factor) < EPSILON)
+                {
+                    continue;
+                }
+
+                for (int j = 0; j <= n; j++)
+                {
+                    tableau[0, j] -=
+                        factor *
+                        tableau[i + 1, j];
+                }
+            }
+
+            CleanTableau(
+                tableau,
+                m,
+                n);
+        }
+
+        // ================================================================
+        // CLEAN SMALL FLOATING POINT VALUES
+        // ================================================================
+
+        private void CleanTableau(
+            double[,] tableau,
+            int m,
+            int n)
+        {
+            for (int i = 0; i <= m; i++)
+            {
+                for (int j = 0; j <= n; j++)
+                {
+                    if (Math.Abs(tableau[i, j]) < EPSILON)
+                    {
+                        tableau[i, j] = 0.0;
+                    }
                 }
             }
         }
 
-        private string FormatTableau(double[,] T, List<int> basis, int m, int n, List<string> varNames)
-        {
-            var sb = new StringBuilder();
-            sb.Append(string.Format("{0,-8}", "Basic"));
-            foreach (var v in varNames) sb.Append(string.Format("{0,10}", v));
-            sb.AppendLine(string.Format("{0,10}", "RHS"));
+        // ================================================================
+        // FORMAT TABLEAU
+        // ================================================================
 
-            sb.Append(string.Format("{0,-8}", "z"));
-            for (int j = 0; j <= n; j++) sb.Append(string.Format("{0,10:F3}", T[0, j]));
+        private string FormatTableau(
+            double[,] tableau,
+            List<int> basis,
+            int m,
+            int n,
+            List<string> variableNames)
+        {
+            var sb =
+                new StringBuilder();
+
+            sb.Append(
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0,-10}",
+                    "Basic"));
+
+            foreach (string variable in variableNames)
+            {
+                sb.Append(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "{0,10}",
+                        variable));
+            }
+
+            sb.AppendLine(
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0,12}",
+                    "RHS"));
+
+            // Objective row.
+            sb.Append(
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0,-10}",
+                    "z"));
+
+            for (int j = 0; j <= n; j++)
+            {
+                sb.Append(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "{0,10:F3}",
+                        tableau[0, j]));
+            }
+
             sb.AppendLine();
 
+            // Constraint rows.
             for (int i = 1; i <= m; i++)
             {
-                sb.Append(string.Format("{0,-8}", varNames[basis[i - 1]]));
-                for (int j = 0; j <= n; j++) sb.Append(string.Format("{0,10:F3}", T[i, j]));
+                string basicName =
+                    "Unknown";
+
+                int basicIndex =
+                    basis[i - 1];
+
+                if (basicIndex >= 0 &&
+                    basicIndex < variableNames.Count)
+                {
+                    basicName =
+                        variableNames[basicIndex];
+                }
+
+                sb.Append(
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "{0,-10}",
+                        basicName));
+
+                for (int j = 0; j <= n; j++)
+                {
+                    sb.Append(
+                        string.Format(
+                            CultureInfo.InvariantCulture,
+                            "{0,10:F3}",
+                            tableau[i, j]));
+                }
+
                 sb.AppendLine();
             }
+
             return sb.ToString();
         }
 
-        private string FormatCanonicalText(CanonicalProblem canonical)
+        // ================================================================
+        // FORMAT CANONICAL FORM
+        // ================================================================
+
+        private string FormatCanonicalText(
+            CanonicalProblem canonical)
         {
-            var sb = new StringBuilder();
-            sb.AppendLine($"{(canonical.Original.IsMaximization ? "max" : "min")} z = " +
-                          string.Join(" + ", canonical.VariableNames.Take(canonical.Original.NumVariables)
-                          .Select((v, i) => $"{canonical.Original.ObjectiveCoeffs[i]}*{v}")));
-            sb.AppendLine("Subject to:");
-            for (int i = 0; i < canonical.NumConstraints; i++)
+            var sb =
+                new StringBuilder();
+
+            string objectiveDirection =
+                canonical.Original.IsMaximization
+                    ? "max"
+                    : "min";
+
+            var objectiveTerms =
+                new List<string>();
+
+            for (int i = 0;
+                 i < canonical.Original.NumVariables;
+                 i++)
             {
-                var terms = new List<string>();
-                for (int j = 0; j < canonical.NumVarsTotal; j++)
+                double coefficient =
+                    canonical.Original.ObjectiveCoeffs[i];
+
+                string variable =
+                    canonical.VariableNames[i];
+
+                if (coefficient >= 0)
                 {
-                    double val = canonical.TableauMatrix[i + 1, j];
-                    if (Math.Abs(val) > 1e-7) terms.Add($"{val:F3}*{canonical.VariableNames[j]}");
+                    objectiveTerms.Add(
+                        coefficient.ToString(
+                            "F3",
+                            CultureInfo.InvariantCulture) +
+                        "*" +
+                        variable);
                 }
-                sb.AppendLine($"  {string.Join(" + ", terms)} = {canonical.TableauMatrix[i + 1, canonical.NumVarsTotal]:F3}");
+                else
+                {
+                    objectiveTerms.Add(
+                        "- " +
+                        Math.Abs(coefficient).ToString(
+                            "F3",
+                            CultureInfo.InvariantCulture) +
+                        "*" +
+                        variable);
+                }
             }
+
+            sb.AppendLine(
+                objectiveDirection +
+                " z = " +
+                string.Join(
+                    " + ",
+                    objectiveTerms));
+
+            sb.AppendLine("Subject to:");
+
+            for (int i = 0;
+                 i < canonical.NumConstraints;
+                 i++)
+            {
+                var terms =
+                    new List<string>();
+
+                for (int j = 0;
+                     j < canonical.NumVarsTotal;
+                     j++)
+                {
+                    double value =
+                        canonical.TableauMatrix[
+                            i + 1,
+                            j];
+
+                    if (Math.Abs(value) <= EPSILON)
+                    {
+                        continue;
+                    }
+
+                    string variable =
+                        canonical.VariableNames[j];
+
+                    string formattedValue =
+                        Math.Abs(value).ToString(
+                            "F3",
+                            CultureInfo.InvariantCulture);
+
+                    if (value >= 0)
+                    {
+                        terms.Add(
+                            formattedValue +
+                            "*" +
+                            variable);
+                    }
+                    else
+                    {
+                        terms.Add(
+                            "- " +
+                            formattedValue +
+                            "*" +
+                            variable);
+                    }
+                }
+
+                double rhs =
+                    canonical.TableauMatrix[
+                        i + 1,
+                        canonical.NumVarsTotal];
+
+                sb.AppendLine(
+                    "  " +
+                    string.Join(
+                        " + ",
+                        terms) +
+                    " = " +
+                    rhs.ToString(
+                        "F3",
+                        CultureInfo.InvariantCulture));
+            }
+
             return sb.ToString();
         }
     }
