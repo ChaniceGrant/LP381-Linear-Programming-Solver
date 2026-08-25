@@ -1,46 +1,111 @@
-﻿using LPR381Solver.Models;
+﻿using System;
+using System.IO;
+using LPR381Solver.Models;
+using LPR381Solver.Services;
 
 namespace LPR381Solver
 {
-    internal class Program
+    class Program
     {
+        private static LpProblem _loadedProblem = null;
+        private static CanonicalProblem _canonicalForm = null;
+
         static void Main(string[] args)
         {
-            Variable x1 = new Variable("x1", 2, "bin");
-
-            Variable x2 = new Variable("x2", 3, "bin");
-
-            Constraint constraint = new Constraint(
-                new List<double> { 11, 8 },
-                "<=",
-                40
-            );
-
-            LPModel model = new LPModel();
-
-            model.ObjectiveType = "max";
-
-            model.Variables.Add(x1);
-            model.Variables.Add(x2);
-
-            model.Constraints.Add(constraint);
-
-            Console.WriteLine("Model created successfully!");
-            Console.WriteLine($"Objective: {model.ObjectiveType}");
-
-            foreach (Variable variable in model.Variables)
+            while (true)
             {
-                Console.WriteLine(
-                    $"{variable.Name}: {variable.ObjectiveCoefficient}, {variable.SignRestriction}"
-                );
+                Console.Clear();
+                Console.WriteLine("=================================================");
+                Console.WriteLine("       LPR381 LINEAR PROGRAMMING SOLVER          ");
+                Console.WriteLine("=================================================");
+                Console.WriteLine("1. Load Input Mathematical Model File");
+                Console.WriteLine("2. Solve with Primal Simplex Algorithm");
+                Console.WriteLine("3. Exit");
+                Console.WriteLine("=================================================");
+                Console.Write("Select an option (1-3): ");
+
+                string choice = Console.ReadLine()?.Trim();
+                switch (choice)
+                {
+                    case "1":
+                        LoadFile();
+                        break;
+                    case "2":
+                        SolvePrimalSimplex();
+                        break;
+                    case "3":
+                        return;
+                    default:
+                        ShowError("Invalid menu selection.");
+                        break;
+                }
+            }
+        }
+
+        private static void LoadFile()
+        {
+            Console.Write("\nEnter input file path (e.g. input.txt): ");
+            string path = Console.ReadLine()?.Trim();
+            if (!File.Exists(path))
+            {
+                ShowError("File does not exist!");
+                return;
             }
 
-            foreach (Constraint c in model.Constraints)
+            try
             {
-                Console.WriteLine(
-                    $"Constraint: {string.Join(" ", c.Coefficients)} {c.Relation} {c.RightHandSide}"
-                );
+                _loadedProblem = InputParser.ParseFile(path);
+                _canonicalForm = CanonicalConverter.ToCanonicalForm(_loadedProblem);
+                Console.WriteLine($"\n[SUCCESS] Loaded model with {_loadedProblem.NumVariables} decision variables and {_loadedProblem.NumConstraints} constraints.");
+                Console.WriteLine("Press any key to continue...");
+                Console.ReadKey();
             }
+            catch (Exception ex)
+            {
+                ShowError($"Failed to parse file: {ex.Message}");
+            }
+        }
+
+        private static void SolvePrimalSimplex()
+        {
+            if (_loadedProblem == null || _canonicalForm == null)
+            {
+                ShowError("No problem loaded! Please load an input file first.");
+                return;
+            }
+
+            var solver = new PrimalSimplexSolver();
+            var result = solver.Solve(_canonicalForm);
+
+            Console.Clear();
+            Console.WriteLine(result.ExecutionLog);
+
+            Console.Write("\nEnter output file path to save results (or press ENTER to skip): ");
+            string outPath = Console.ReadLine()?.Trim();
+            if (!string.IsNullOrEmpty(outPath))
+            {
+                try
+                {
+                    File.WriteAllText(outPath, result.ExecutionLog);
+                    Console.WriteLine($"\n[SUCCESS] Results written to {outPath}");
+                }
+                catch (Exception ex)
+                {
+                    ShowError($"Failed to write output file: {ex.Message}");
+                }
+            }
+
+            Console.WriteLine("\nPress any key to return to menu...");
+            Console.ReadKey();
+        }
+
+        private static void ShowError(string msg)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"\n[ERROR] {msg}");
+            Console.ResetColor();
+            Console.WriteLine("Press any key to continue...");
+            Console.ReadKey();
         }
     }
 }
