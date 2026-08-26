@@ -1,0 +1,108 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+ 
+using LPR381Solver.Models;
+
+namespace LPR381Solver.Algorithms
+{
+    public static class RevisedPrimalSimplexDemo
+    {
+        public static void RunAll()
+        {
+            RunOptimalLessThan();
+            RunInfeasible();
+            RunUnbounded();
+            RunOptimalGreaterThanMin();
+        }
+
+        //EXAMPLE
+        //Expected: x1 = 2, x2 = 6, z = 36
+        public static void RunOptimalLessThan()
+        {
+            Console.WriteLine("### CASE 1: Optimal, <= constraints only");
+			Console.WriteLine();
+
+            LPModel model = new LPModel();
+            model.ObjectiveType = "max";
+            model.Variables.Add(new Variable("x1", 3, "+"));
+            model.Variables.Add(new Variable("x2", 5, "+"));
+
+            model.Constraints.Add(new Constraint(new List<double> { 1, 0 }, "<=", 4));
+            model.Constraints.Add(new Constraint(new List<double> { 0, 2 }, "<=", 12));
+            model.Constraints.Add(new Constraint(new List<double> { 3, 2 }, "<=", 18));
+
+            Run(model);
+        }
+
+        //Run contradictory constraints
+        //Expected status = Infeasible
+        public static void RunInfeasible()
+        {
+            Console.WriteLine("### CASE 2 : Infeasible Model");
+            Console.WriteLine();
+
+            LPModel model = new LPModel();
+            model.ObjectiveType = "max";
+            model.Variables.Add(new Variable("x1", 1, "+"));
+            mdoel.Variables.Add(new Variable("x2", 1, "+"));
+
+            model.Constraints.Add(new Constraint(new List<double> { 1,1 }, "<=", 2));
+            model.Constraints.Add(new Constraint(new List<double> { 1,1 }, ">=", 10));
+
+            Run(model);
+        }
+
+        //Run unbounded example
+        public static void RunUnbounded()
+        {
+            Console.WriteLine("### CASE 3 : Unbounded model");
+            Console.WriteLine();
+
+            LPModel model = new LPModel();
+            model.ObjectiveType = "max";
+            model.Variables.Add(new Variable("x1", 1, "+"));
+            model.Variables.Add(new Variable("x2", 1, "+"));
+
+            model.Constraints.Add(new Constraint(new List<double> { 1, -1 }, "<=",1));
+
+            Run(model);
+        }
+
+        //exercise with Big-M with real artificial pivoting
+        public static void RunOptimalGreaterThanMin()
+        {
+            Console.WriteLine("### CASE 4 : Optimal, >= constraints, minimisation");
+            Console.WriteLine();
+
+            LPModel model = new LPModel();
+            model.ObjectiveType = "min";
+            model.Variables.Add(new Variable("x1", 1, "+"));
+            model.Variables.Add(new Variable("x2", 1, "+"));
+
+            model.Constraints.Add(new Constraint(new List<double> { 1, 2 }, ">=", 4));
+            model.Constraints.Add(new Constraint(new List<double> { 3, 2 }, ">=", 6));
+
+            Run(model);
+        }
+
+        private static void Run(LPModel model)
+        {
+            try{
+                    RevisedPrimalSimplex solver = new RevisedPrimalSimplex();
+                    solver.Solve(model);
+                    Console.WriteLine(solver.Log);
+                    Console.WriteLine("Status: " + solver.Status);
+                    Console.WriteLine();
+            }
+            catch(InvalidOperationException ex)
+            {
+                Console.WriteLine("This model was not able to be solved");
+                Console.WriteLine("Reason: " + ex.Message);
+                Console.WriteLine();
+            }
+        }
+    }
+}
