@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using LPR381Solver.Models;
 
@@ -6,224 +6,228 @@ namespace LPR381Solver.Services
 {
     public static class CanonicalConverter
     {
+        private sealed class NormalizedConstraint
+        {
+            public List<double> Coefficients { get; init; } = new();
+            public string Relation { get; init; } = string.Empty;
+            public double Rhs { get; init; }
+        }
+
         public static CanonicalProblem ToCanonicalForm(LpProblem lp)
         {
-            if (lp == null)
-                throw new ArgumentNullException(nameof(lp));
+            ArgumentNullException.ThrowIfNull(lp);
+            ValidateModel(lp);
 
-            var varNames = new List<string>();
+            var variableNames = new List<string>();
+            var originalColumns = new List<List<int>>();
+            var originalMultipliers = new List<List<double>>();
 
-            // Original decision variables
-            for (int i = 1; i <= lp.NumVariables; i++)
+            // Expand original variables into non-negative canonical variables.
+            for (int j = 0; j < lp.NumVariables; j++)
             {
-                varNames.Add($"x{i}");
+                string restriction = lp.SignRestrictions[j].ToLowerInvariant();
+                var columns = new List<int>();
+                var multipliers = new List<double>();
+
+                if (restriction == "-")
+                {
+                    columns.Add(variableNames.Count);
+                    multipliers.Add(-1.0);
+                    variableNames.Add($"x{j + 1}_neg");
+                }
+                else if (restriction == "urs")
+                {
+                    columns.Add(variableNames.Count);
+                    multipliers.Add(1.0);
+                    variableNames.Add($"x{j + 1}_pos");
+
+                    columns.Add(variableNames.Count);
+                    multipliers.Add(-1.0);
+                    variableNames.Add($"x{j + 1}_neg");
+                }
+                else
+                {
+                    // +, int and bin are non-negative in the LP relaxation.
+                    columns.Add(variableNames.Count);
+                    multipliers.Add(1.0);
+                    variableNames.Add($"x{j + 1}");
+                }
+
+                originalColumns.Add(columns);
+                originalMultipliers.Add(multipliers);
+            }
+
+            int structuralVariableCount = variableNames.Count;
+            var constraints = new List<NormalizedConstraint>();
+
+            // Transform original constraints to the expanded non-negative variables.
+            for (int i = 0; i < lp.NumConstraints; i++)
+            {
+                var expanded = new double[structuralVariableCount];
+
+                for (int originalVar = 0; originalVar < lp.NumVariables; originalVar++)
+                {
+                    double a = lp.ConstraintCoeffs[i][originalVar];
+                    for (int k = 0; k < originalColumns[originalVar].Count; k++)
+                    {
+                        int col = originalColumns[originalVar][k];
+                        expanded[col] += a * originalMultipliers[originalVar][k];
+                    }
+                }
+
+                AddNormalizedConstraint(
+                    constraints,
+                    new List<double>(expanded),
+                    lp.Relations[i],
+                    lp.Rhs[i]);
+            }
+
+            // A binary variable's LP relaxation includes x <= 1.
+            for (int j = 0; j < lp.NumVariables; j++)
+            {
+                if (!lp.SignRestrictions[j].Equals("bin", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var bound = new double[structuralVariableCount];
+                bound[originalColumns[j][0]] = 1.0;
+                AddNormalizedConstraint(constraints, new List<double>(bound), "<=", 1.0);
             }
 
             int slackCount = 0;
             int surplusCount = 0;
             int artificialCount = 0;
-
-            var additionalVariables = new List<string>();
             var basicVariables = new List<int>();
             var artificialIndices = new List<int>();
 
-            /*
-             * First determine which additional variables are required.
-             *
-             * <=  : add slack variable
-             * >=  : add surplus variable and artificial variable
-             * =   : add artificial variable
-             */
-            for (int i = 0; i < lp.NumConstraints; i++)
+            // Allocate auxiliary columns AFTER RHS normalization so the relation is final.
+            foreach (NormalizedConstraint constraint in constraints)
             {
-                string relation = lp.Relations[i].Trim();
-
-                if (relation == "<=")
+                switch (constraint.Relation)
                 {
-                    slackCount++;
+                    case "<=":
+                        variableNames.Add($"s{++slackCount}");
+                        basicVariables.Add(variableNames.Count - 1);
+                        break;
 
-                    additionalVariables.Add($"s{slackCount}");
+                    case ">=":
+                        variableNames.Add($"e{++surplusCount}");
+                        variableNames.Add($"a{++artificialCount}");
+                        artificialIndices.Add(variableNames.Count - 1);
+                        basicVariables.Add(variableNames.Count - 1);
+                        break;
 
-                    int slackIndex =
-                        lp.NumVariables + additionalVariables.Count - 1;
-
-                    basicVariables.Add(slackIndex);
-                }
-                else if (relation == ">=")
-                {
-                    surplusCount++;
-                    additionalVariables.Add($"e{surplusCount}");
-
-                    artificialCount++;
-                    additionalVariables.Add($"a{artificialCount}");
-
-                    int artificialIndex =
-                        lp.NumVariables + additionalVariables.Count - 1;
-
-                    artificialIndices.Add(artificialIndex);
-
-                    // Artificial variable is initially basic.
-                    basicVariables.Add(artificialIndex);
-                }
-                else if (relation == "=")
-                {
-                    artificialCount++;
-                    additionalVariables.Add($"a{artificialCount}");
-
-                    int artificialIndex =
-                        lp.NumVariables + additionalVariables.Count - 1;
-
-                    artificialIndices.Add(artificialIndex);
-
-                    // Artificial variable is initially basic.
-                    basicVariables.Add(artificialIndex);
-                }
-                else
-                {
-                    throw new InvalidOperationException(
-                        $"Invalid constraint relation '{relation}' at constraint {i + 1}."
-                    );
+                    case "=":
+                        variableNames.Add($"a{++artificialCount}");
+                        artificialIndices.Add(variableNames.Count - 1);
+                        basicVariables.Add(variableNames.Count - 1);
+                        break;
                 }
             }
 
-            varNames.AddRange(additionalVariables);
+            int totalVariables = variableNames.Count;
+            int m = constraints.Count;
+            var matrix = new double[m + 1, totalVariables + 1];
 
-            int totalVars = varNames.Count;
-
-            /*
-             * Tableau layout:
-             *
-             * Row 0                  = objective function
-             * Rows 1..m              = constraints
-             * Column totalVars       = RHS
-             */
-            double[,] matrix =
-                new double[lp.NumConstraints + 1, totalVars + 1];
-
-            /*
-             * Objective row.
-             *
-             * We use the convention:
-             *
-             *     z - c1x1 - c2x2 - ... = 0
-             *
-             * Therefore a maximisation problem uses -c_j.
-             *
-             * For minimisation, the objective is represented as the
-             * maximisation of the negative objective. The original
-             * objective direction is retained in lp.IsMaximization so
-             * the final result can be converted back by the solver.
-             */
-            for (int j = 0; j < lp.NumVariables; j++)
+            // Convert min c*x to max (-c*x), then use z - c_eff*x = 0.
+            for (int originalVar = 0; originalVar < lp.NumVariables; originalVar++)
             {
-                matrix[0, j] = -lp.ObjectiveCoeffs[j];
+                double effectiveC = lp.IsMaximization
+                    ? lp.ObjectiveCoeffs[originalVar]
+                    : -lp.ObjectiveCoeffs[originalVar];
+
+                for (int k = 0; k < originalColumns[originalVar].Count; k++)
+                {
+                    int col = originalColumns[originalVar][k];
+                    matrix[0, col] = -effectiveC * originalMultipliers[originalVar][k];
+                }
             }
 
-            /*
-             * Build the constraint rows.
-             *
-             * Before constructing the row, make sure the RHS is
-             * non-negative. If the RHS is negative, multiply the entire
-             * constraint by -1 and reverse the relation.
-             */
-            int additionalVariablePosition = 0;
-
-            for (int i = 0; i < lp.NumConstraints; i++)
+            int auxiliaryColumn = structuralVariableCount;
+            for (int i = 0; i < m; i++)
             {
                 int row = i + 1;
+                NormalizedConstraint constraint = constraints[i];
 
-                if (lp.ConstraintCoeffs[i].Count != lp.NumVariables)
+                for (int j = 0; j < structuralVariableCount; j++)
+                    matrix[row, j] = constraint.Coefficients[j];
+
+                matrix[row, totalVariables] = constraint.Rhs;
+
+                switch (constraint.Relation)
                 {
-                    throw new InvalidOperationException(
-                        $"Constraint {i + 1} has {lp.ConstraintCoeffs[i].Count} coefficients, " +
-                        $"but {lp.NumVariables} decision variables were expected."
-                    );
-                }
-
-                string relation = lp.Relations[i].Trim();
-                double rhs = lp.Rhs[i];
-
-                // Copy the original coefficients.
-                for (int j = 0; j < lp.NumVariables; j++)
-                {
-                    matrix[row, j] = lp.ConstraintCoeffs[i][j];
-                }
-
-                /*
-                 * If RHS is negative, multiply the entire constraint
-                 * by -1 and reverse the relation.
-                 */
-                if (rhs < 0)
-                {
-                    for (int j = 0; j < lp.NumVariables; j++)
-                    {
-                        matrix[row, j] = -matrix[row, j];
-                    }
-
-                    rhs = -rhs;
-
-                    relation = ReverseRelation(relation);
-                }
-
-                matrix[row, totalVars] = rhs;
-
-                /*
-                 * Add the appropriate canonical variable.
-                 */
-                if (relation == "<=")
-                {
-                    // + slack variable
-                    matrix[row, lp.NumVariables + additionalVariablePosition] = 1.0;
-
-                    additionalVariablePosition++;
-                }
-                else if (relation == ">=")
-                {
-                    // - surplus variable
-                    matrix[row, lp.NumVariables + additionalVariablePosition] = -1.0;
-                    additionalVariablePosition++;
-
-                    // + artificial variable
-                    matrix[row, lp.NumVariables + additionalVariablePosition] = 1.0;
-                    additionalVariablePosition++;
-                }
-                else if (relation == "=")
-                {
-                    // + artificial variable
-                    matrix[row, lp.NumVariables + additionalVariablePosition] = 1.0;
-                    additionalVariablePosition++;
-                }
-                else
-                {
-                    throw new InvalidOperationException(
-                        $"Invalid constraint relation '{relation}' at constraint {i + 1}."
-                    );
+                    case "<=":
+                        matrix[row, auxiliaryColumn++] = 1.0;
+                        break;
+                    case ">=":
+                        matrix[row, auxiliaryColumn++] = -1.0;
+                        matrix[row, auxiliaryColumn++] = 1.0;
+                        break;
+                    case "=":
+                        matrix[row, auxiliaryColumn++] = 1.0;
+                        break;
                 }
             }
 
             return new CanonicalProblem
             {
                 Original = lp,
-                VariableNames = varNames,
+                VariableNames = variableNames,
                 TableauMatrix = matrix,
                 BasicVariables = basicVariables,
-                NumVarsTotal = totalVars,
-                NumConstraints = lp.NumConstraints,
-                ArtificialVarIndices = artificialIndices
+                NumVarsTotal = totalVariables,
+                NumConstraints = m,
+                ArtificialVarIndices = artificialIndices,
+                OriginalVariableColumns = originalColumns,
+                OriginalVariableMultipliers = originalMultipliers
             };
         }
 
-        private static string ReverseRelation(string relation)
+        private static void AddNormalizedConstraint(
+            List<NormalizedConstraint> destination,
+            List<double> coefficients,
+            string relation,
+            double rhs)
         {
-            return relation switch
+            relation = relation.Trim();
+            if (relation != "<=" && relation != ">=" && relation != "=")
+                throw new FormatException($"Invalid constraint relation '{relation}'.");
+
+            if (rhs < 0.0)
             {
-                "<=" => ">=",
-                ">=" => "<=",
-                "=" => "=",
-                _ => throw new InvalidOperationException(
-                    $"Cannot reverse invalid relation '{relation}'."
-                )
-            };
+                for (int j = 0; j < coefficients.Count; j++)
+                    coefficients[j] = -coefficients[j];
+
+                rhs = -rhs;
+                relation = relation switch
+                {
+                    "<=" => ">=",
+                    ">=" => "<=",
+                    _ => "="
+                };
+            }
+
+            destination.Add(new NormalizedConstraint
+            {
+                Coefficients = coefficients,
+                Relation = relation,
+                Rhs = rhs
+            });
+        }
+
+        private static void ValidateModel(LpProblem lp)
+        {
+            if (lp.NumVariables == 0)
+                throw new FormatException("The model must contain at least one decision variable.");
+            if (lp.NumConstraints == 0)
+                throw new FormatException("The model must contain at least one constraint.");
+            if (lp.SignRestrictions.Count != lp.NumVariables)
+                throw new FormatException("The number of sign restrictions must match the number of variables.");
+            if (lp.Relations.Count != lp.NumConstraints || lp.Rhs.Count != lp.NumConstraints)
+                throw new FormatException("Constraint relations/RHS counts do not match the number of constraints.");
+
+            for (int i = 0; i < lp.NumConstraints; i++)
+                if (lp.ConstraintCoeffs[i].Count != lp.NumVariables)
+                    throw new FormatException($"Constraint {i + 1} does not contain {lp.NumVariables} coefficients.");
         }
     }
 }
