@@ -22,6 +22,11 @@ namespace LPR381Solver.Services
             public double ObjectiveValue { get; set; }
             public double[] VariableValues { get; set; } = Array.Empty<double>();
             public string ExecutionLog { get; set; } = string.Empty;
+
+            // Person D uses these fields for post-optimal sensitivity analysis.
+            public double[,] FinalTableau { get; set; } = new double[0, 0];
+            public List<int> FinalBasis { get; set; } = new();
+            public CanonicalProblem? CanonicalProblem { get; set; }
         }
 
         private const double Epsilon = 1e-9;
@@ -56,7 +61,10 @@ namespace LPR381Solver.Services
                     return new Result
                     {
                         Status = SolutionStatus.Infeasible,
-                        ExecutionLog = log.ToString()
+                        ExecutionLog = log.ToString(),
+                        FinalTableau = (double[,])tableau.Clone(),
+                        FinalBasis = new List<int>(basis),
+                        CanonicalProblem = canonical
                     };
                 }
 
@@ -86,7 +94,10 @@ namespace LPR381Solver.Services
                 return new Result
                 {
                     Status = SolutionStatus.Unbounded,
-                    ExecutionLog = log.ToString()
+                    ExecutionLog = log.ToString(),
+                    FinalTableau = (double[,])tableau.Clone(),
+                    FinalBasis = new List<int>(basis),
+                    CanonicalProblem = canonical
                 };
             }
 
@@ -118,7 +129,10 @@ namespace LPR381Solver.Services
                 Status = SolutionStatus.Optimal,
                 ObjectiveValue = objectiveValue,
                 VariableValues = originalValues,
-                ExecutionLog = log.ToString()
+                ExecutionLog = log.ToString(),
+                FinalTableau = (double[,])tableau.Clone(),
+                FinalBasis = new List<int>(basis),
+                CanonicalProblem = canonical
             };
         }
 
