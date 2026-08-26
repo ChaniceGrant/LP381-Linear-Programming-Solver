@@ -10,15 +10,25 @@ namespace LPR381Solver.Algorithms
     public class SimplexCore
     {
         public const double Epsilon = 1e-9;
+
         public List<double[]> Tableau { get; private set; } = new List<double[]>();
+
         public List<string> ColumnNames { get; private set; } = new List<string>();
+
         public List<int> Basis { get; private set; } = new List<int>();
+
         public int DecisionVariableCount { get; private set; }
+
         public bool WasMinimisation { get; private set; }
+
         public bool IsUnbounded { get; private set; }
+
         public bool IsInfeasible { get; private set; }
+
         private readonly StringBuilder _log = new StringBuilder();
+
         public string Log => _log.ToString();
+
         public int ColumnCount => ColumnNames.Count;
 
         public double ObjectiveValue
@@ -30,20 +40,19 @@ namespace LPR381Solver.Algorithms
             }
         }
 
-        public void BuildCanonicalForm(LPModel model)
+        public void BuildCanonicalForm(LpProblem problem)
         {
-            Validate(model);
+            Validate(problem);
 
-            DecisionVariableCount = model.Variables.Count;
-            WasMinimisation = string.Equals(model.ObjectiveType, "min",
-                                            StringComparison.OrdinalIgnoreCase);
+            DecisionVariableCount = problem.NumVariables;
+            WasMinimisation = !problem.IsMaximization;
 
-            int constraintCount = model.Constraints.Count;
+            int constraintCount = problem.NumConstraints;
             int totalColumns = DecisionVariableCount + constraintCount;
 
             ColumnNames = new List<string>();
             for (int j = 0; j < DecisionVariableCount; j++)
-                ColumnNames.Add(model.Variables[j].Name);
+                ColumnNames.Add("x" + (j + 1));
             for (int i = 0; i < constraintCount; i++)
                 ColumnNames.Add("s" + (i + 1));
 
@@ -53,7 +62,7 @@ namespace LPR381Solver.Algorithms
             double[] objectiveRow = new double[totalColumns + 1];
             for (int j = 0; j < DecisionVariableCount; j++)
             {
-                double coefficient = model.Variables[j].ObjectiveCoefficient;
+                double coefficient = problem.ObjectiveCoeffs[j];
                 if (WasMinimisation) coefficient = -coefficient;
                 objectiveRow[j] = -coefficient;
             }
@@ -61,20 +70,20 @@ namespace LPR381Solver.Algorithms
 
             for (int i = 0; i < constraintCount; i++)
             {
-                Constraint constraint = model.Constraints[i];
+                List<double> coefficients = problem.ConstraintCoeffs[i];
                 double[] row = new double[totalColumns + 1];
 
                 for (int j = 0; j < DecisionVariableCount; j++)
-                    row[j] = constraint.Coefficients[j];
+                    row[j] = coefficients[j];
 
-                row[DecisionVariableCount + i] = 1.0;      
-                row[totalColumns] = constraint.RightHandSide;
+                row[DecisionVariableCount + i] = 1.0;
+                row[totalColumns] = problem.Rhs[i];
 
                 Tableau.Add(row);
                 Basis.Add(DecisionVariableCount + i);
             }
 
-            WriteCanonicalForm(model);
+            WriteCanonicalForm(problem);
         }
 
         public bool SolvePrimal()
@@ -232,8 +241,8 @@ namespace LPR381Solver.Algorithms
             {
                 double[] widened = new double[ColumnCount + 2];
                 Array.Copy(Tableau[i], widened, ColumnCount);
-                widened[ColumnCount] = 0.0;                      
-                widened[ColumnCount + 1] = Tableau[i][ColumnCount]; 
+                widened[ColumnCount] = 0.0;
+                widened[ColumnCount + 1] = Tableau[i][ColumnCount];
                 Tableau[i] = widened;
             }
 
@@ -242,7 +251,7 @@ namespace LPR381Solver.Algorithms
             double[] newRow = new double[ColumnCount + 1];
             for (int j = 0; j < cutCoefficients.Length; j++)
                 newRow[j] = cutCoefficients[j];
-            newRow[ColumnCount - 1] = 1.0;              
+            newRow[ColumnCount - 1] = 1.0;
             newRow[ColumnCount] = cutRightHandSide;
 
             Tableau.Add(newRow);
@@ -262,69 +271,69 @@ namespace LPR381Solver.Algorithms
             return solution;
         }
 
-        private void Validate(LPModel model)
+        private void Validate(LpProblem problem)
         {
-            if (model == null)
-                throw new ArgumentNullException(nameof(model));
+            if (problem == null)
+                throw new ArgumentNullException(nameof(problem));
 
-            if (model.Variables == null || model.Variables.Count == 0)
+            if (problem.NumVariables == 0)
                 throw new InvalidOperationException("The model has no decision variables.");
 
-            if (model.Constraints == null || model.Constraints.Count == 0)
+            if (problem.NumConstraints == 0)
                 throw new InvalidOperationException("The model has no constraints.");
 
-            foreach (Constraint constraint in model.Constraints)
+            for (int i = 0; i < problem.NumConstraints; i++)
             {
-                if (constraint.Relation != "<=")
+                if (problem.Relations[i] != "<=")
                     throw new InvalidOperationException(
-                        "This simplex engine supports <= constraints only. "
-                        + "Found the relation '" + constraint.Relation + "'.");
+                        "This Cutting Plane implementation supports <= constraints only. "
+                        + "Constraint " + (i + 1) + " uses '" + problem.Relations[i] + "'. "
+                        + "Solve this model with the Primal Simplex Algorithm instead.");
 
-                if (constraint.RightHandSide < 0)
+                if (problem.Rhs[i] < 0)
                     throw new InvalidOperationException(
-                        "This simplex engine requires non-negative right hand sides.");
+                        "This Cutting Plane implementation requires non-negative right hand sides.");
 
-                if (constraint.Coefficients.Count != model.Variables.Count)
+                if (problem.ConstraintCoeffs[i].Count != problem.NumVariables)
                     throw new InvalidOperationException(
-                        "A constraint has a different number of coefficients than there are variables.");
+                        "Constraint " + (i + 1) + " has a different number of coefficients "
+                        + "than there are variables.");
             }
         }
 
-        private void WriteCanonicalForm(LPModel model)
+        private void WriteCanonicalForm(LpProblem problem)
         {
             _log.AppendLine("CANONICAL FORM");
             _log.AppendLine("----------------------------------------------------------");
 
-            _log.Append(WasMinimisation
-                ? "  min z = "
-                : "  max z = ");
+            _log.Append(problem.IsMaximization ? "  max z = " : "  min z = ");
 
             for (int j = 0; j < DecisionVariableCount; j++)
             {
-                double coefficient = model.Variables[j].ObjectiveCoefficient;
+                double coefficient = problem.ObjectiveCoeffs[j];
                 _log.Append(string.Format(CultureInfo.InvariantCulture,
-                    "{0}{1:F3}{2} ", coefficient >= 0 ? "+" : "-",
-                    Math.Abs(coefficient), model.Variables[j].Name));
+                    "{0}{1:F3}x{2} ", coefficient >= 0 ? "+" : "-",
+                    Math.Abs(coefficient), j + 1));
             }
             _log.AppendLine();
 
             if (WasMinimisation)
                 _log.AppendLine("  (solved as a maximisation of the negated objective)");
 
-            for (int i = 0; i < model.Constraints.Count; i++)
+            for (int i = 0; i < problem.NumConstraints; i++)
             {
-                Constraint constraint = model.Constraints[i];
+                List<double> coefficients = problem.ConstraintCoeffs[i];
                 _log.Append("  ");
 
                 for (int j = 0; j < DecisionVariableCount; j++)
                 {
                     _log.Append(string.Format(CultureInfo.InvariantCulture,
-                        "{0}{1:F3}{2} ", constraint.Coefficients[j] >= 0 ? "+" : "-",
-                        Math.Abs(constraint.Coefficients[j]), model.Variables[j].Name));
+                        "{0}{1:F3}x{2} ", coefficients[j] >= 0 ? "+" : "-",
+                        Math.Abs(coefficients[j]), j + 1));
                 }
 
                 _log.AppendLine(string.Format(CultureInfo.InvariantCulture,
-                    "+ s{0} = {1:F3}", i + 1, constraint.RightHandSide));
+                    "+ s{0} = {1:F3}", i + 1, problem.Rhs[i]));
             }
 
             _log.AppendLine();

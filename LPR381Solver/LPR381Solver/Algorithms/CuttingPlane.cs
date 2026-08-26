@@ -7,13 +7,14 @@ using LPR381Solver.Models;
 
 namespace LPR381Solver.Algorithms
 {
-
     public class CuttingPlane
     {
         private const double Epsilon = 1e-9;
+
         private const int MaximumCuts = 30;
 
         private SimplexCore _simplex = new SimplexCore();
+
         public int CutCount { get; private set; }
 
         public double ObjectiveValue { get; private set; }
@@ -22,13 +23,11 @@ namespace LPR381Solver.Algorithms
 
         public bool Solved { get; private set; }
 
-        private readonly StringBuilder _log = new StringBuilder();
+        public string Log => _simplex.Log;
 
-        public string Log => _log.ToString() + _simplex.Log;
-
-        public void Solve(LPModel model)
+        public void Solve(LpProblem problem)
         {
-            ValidateIntegerModel(model);
+            ValidateIntegerModel(problem);
 
             _simplex = new SimplexCore();
             _simplex.WriteLine("==========================================================");
@@ -36,7 +35,7 @@ namespace LPR381Solver.Algorithms
             _simplex.WriteLine("==========================================================");
             _simplex.WriteLine(string.Empty);
 
-            _simplex.BuildCanonicalForm(model);
+            _simplex.BuildCanonicalForm(problem);
             _simplex.WriteLine("STEP 1: Solve the LP relaxation with the Primal Simplex Algorithm");
             _simplex.WriteLine("----------------------------------------------------------");
 
@@ -129,7 +128,7 @@ namespace LPR381Solver.Algorithms
             for (int i = 1; i < _simplex.Tableau.Count; i++)
             {
                 if (_simplex.Basis[i - 1] >= _simplex.DecisionVariableCount)
-                    continue; 
+                    continue;
 
                 if (FractionalPart(_simplex.Tableau[i][_simplex.ColumnCount]) > Epsilon)
                     return i;
@@ -161,7 +160,7 @@ namespace LPR381Solver.Algorithms
             for (int j = 0; j < Solution.Length; j++)
             {
                 _simplex.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                    "  {0} = {1:F3}", _simplex.ColumnNames[j], Solution[j]));
+                    "  x{0} = {1:F3}", j + 1, Solution[j]));
             }
 
             _simplex.WriteLine(string.Format(CultureInfo.InvariantCulture,
@@ -170,28 +169,28 @@ namespace LPR381Solver.Algorithms
                 "  Cuts generated = {0}", CutCount));
         }
 
-        private static void ValidateIntegerModel(LPModel model)
+        private static void ValidateIntegerModel(LpProblem problem)
         {
-            if (model == null)
-                throw new ArgumentNullException(nameof(model));
+            if (problem == null)
+                throw new ArgumentNullException(nameof(problem));
 
-            if (model.Variables == null || model.Variables.Count == 0)
+            if (problem.NumVariables == 0)
                 throw new InvalidOperationException("The model has no decision variables.");
 
             bool hasIntegerVariable = false;
 
-            foreach (Variable variable in model.Variables)
+            foreach (string restriction in problem.SignRestrictions)
             {
-                if (string.Equals(variable.SignRestriction, "int", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(restriction, "int", StringComparison.OrdinalIgnoreCase))
                 {
                     hasIntegerVariable = true;
                 }
-                else if (string.Equals(variable.SignRestriction, "bin", StringComparison.OrdinalIgnoreCase))
+                else if (string.Equals(restriction, "bin", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidOperationException(
                         "This model is binary. Use the Branch and Bound Knapsack algorithm instead.");
                 }
-                else if (string.Equals(variable.SignRestriction, "urs", StringComparison.OrdinalIgnoreCase))
+                else if (string.Equals(restriction, "urs", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidOperationException(
                         "Unrestricted in sign variables are not supported by this Cutting Plane implementation.");

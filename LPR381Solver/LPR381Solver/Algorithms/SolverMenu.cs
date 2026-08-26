@@ -1,24 +1,36 @@
-﻿using System;
+﻿using LPR381Solver.Models;
+using LPR381Solver.Parsing;
+using LPR381Solver.Services;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 
-using LPR381Solver.Models;
-
 namespace LPR381Solver.Algorithms
 {
+    /// <summary>
+    /// A standalone menu for the Branch and Bound Knapsack and Cutting Plane
+    /// algorithms. It reads a model with the shared InputParser, lets the user
+    /// choose an algorithm, prints the full working and writes it to an output
+    /// text file.
+    ///
+    /// This exists so that these two algorithms can be developed and demonstrated
+    /// independently. Once the shared UI/Menu.cs is complete it should call the
+    /// same solvers directly, and this class becomes a fallback.
+    /// </summary>
     public static class SolverMenu
     {
+        /// <summary>Entry point for the menu loop.</summary>
         public static void Run()
         {
-            LPModel? model = null;
+            LpProblem? problem = null;
             string modelSource = "(no model loaded)";
 
             while (true)
             {
                 Console.WriteLine();
                 Console.WriteLine("==========================================================");
-                Console.WriteLine("   LPR381 SOLVER");
+                Console.WriteLine("   LPR381 SOLVER - KNAPSACK AND CUTTING PLANE");
                 Console.WriteLine("==========================================================");
                 Console.WriteLine("  Current model: " + modelSource);
                 Console.WriteLine();
@@ -26,6 +38,7 @@ namespace LPR381Solver.Algorithms
                 Console.WriteLine("  2. Solve with the Branch and Bound Knapsack Algorithm");
                 Console.WriteLine("  3. Solve with the Cutting Plane Algorithm");
                 Console.WriteLine("  4. Display the loaded model");
+                Console.WriteLine("  5. Run the built in demonstration cases");
                 Console.WriteLine("  0. Exit");
                 Console.WriteLine();
                 Console.Write("  Select an option: ");
@@ -36,19 +49,23 @@ namespace LPR381Solver.Algorithms
                 switch (choice.Trim())
                 {
                     case "1":
-                        LoadModel(ref model, ref modelSource);
+                        LoadModel(ref problem, ref modelSource);
                         break;
 
                     case "2":
-                        SolveKnapsack(model);
+                        SolveKnapsack(problem);
                         break;
 
                     case "3":
-                        SolveCuttingPlane(model);
+                        SolveCuttingPlane(problem);
                         break;
 
                     case "4":
-                        DisplayModel(model);
+                        DisplayModel(problem);
+                        break;
+
+                    case "5":
+                        IntegerAlgorithmDemos.RunAll();
                         break;
 
                     case "0":
@@ -56,12 +73,18 @@ namespace LPR381Solver.Algorithms
                         return;
 
                     default:
-                        Console.WriteLine("  '" + choice + "' is not a valid option. Please choose 0 to 4.");
+                        Console.WriteLine("  '" + choice + "' is not a valid option. Please choose 0 to 5.");
                         break;
                 }
             }
         }
-        private static void LoadModel(ref LPModel? model, ref string modelSource)
+
+        /// <summary>
+        /// Prompts for a file path and parses the model with the shared InputParser,
+        /// so that this menu accepts exactly the same file format as the rest of
+        /// the program.
+        /// </summary>
+        private static void LoadModel(ref LpProblem? problem, ref string modelSource)
         {
             Console.Write("  Enter the input file path: ");
             string path = (Console.ReadLine() ?? string.Empty).Trim().Trim('"');
@@ -72,188 +95,27 @@ namespace LPR381Solver.Algorithms
                 return;
             }
 
-            if (!File.Exists(path))
-            {
-                Console.WriteLine("  The file '" + path + "' does not exist.");
-                return;
-            }
-
             try
             {
-                model = ParseInputFile(path);
+                problem = InputParser.ParseFile(path);
                 modelSource = Path.GetFileName(path);
                 Console.WriteLine("  Model loaded successfully from " + modelSource + ".");
                 Console.WriteLine();
-                DisplayModel(model);
+                DisplayModel(problem);
             }
             catch (Exception ex)
             {
-                model = null;
+                problem = null;
                 modelSource = "(no model loaded)";
                 Console.WriteLine("  The file could not be read as a programming model.");
                 Console.WriteLine("  Reason: " + ex.Message);
             }
         }
 
-        public static LPModel ParseInputFile(string path)
+        /// <summary>Prints the loaded model in a readable form.</summary>
+        private static void DisplayModel(LpProblem? problem)
         {
-            List<string> lines = new List<string>();
-
-            foreach (string raw in File.ReadAllLines(path))
-            {
-                string trimmed = raw.Trim();
-                if (trimmed.Length > 0)
-                    lines.Add(trimmed);
-            }
-
-            if (lines.Count < 3)
-                throw new InvalidOperationException(
-                    "The file needs at least an objective line, one constraint line and a sign restriction line.");
-
-            LPModel model = new LPModel();
-
-            string[] objectiveTokens = SplitTokens(lines[0]);
-
-            if (objectiveTokens.Length < 2)
-                throw new InvalidOperationException("The objective line is incomplete.");
-
-            string objectiveType = objectiveTokens[0].ToLowerInvariant();
-
-            if (objectiveType != "max" && objectiveType != "min")
-                throw new InvalidOperationException(
-                    "The objective line must start with 'max' or 'min', but it starts with '"
-                    + objectiveTokens[0] + "'.");
-
-            model.ObjectiveType = objectiveType;
-
-            List<double> objectiveCoefficients = new List<double>();
-            for (int i = 1; i < objectiveTokens.Length; i++)
-                objectiveCoefficients.Add(ParseSignedNumber(objectiveTokens[i], "objective coefficient"));
-
-            int variableCount = objectiveCoefficients.Count;
-
-            if (variableCount == 0)
-                throw new InvalidOperationException("The objective line has no coefficients.");
-
-            string[] signTokens = SplitTokens(lines[lines.Count - 1]);
-
-            if (signTokens.Length != variableCount)
-                throw new InvalidOperationException(
-                    "There are " + variableCount + " variables but "
-                    + signTokens.Length + " sign restrictions.");
-
-            for (int j = 0; j < variableCount; j++)
-            {
-                string restriction = signTokens[j].ToLowerInvariant();
-
-                if (restriction != "+" && restriction != "-" && restriction != "urs"
-                    && restriction != "int" && restriction != "bin")
-                {
-                    throw new InvalidOperationException(
-                        "'" + signTokens[j] + "' is not a valid sign restriction. "
-                        + "Use +, -, urs, int or bin.");
-                }
-
-                model.Variables.Add(new Variable("x" + (j + 1), objectiveCoefficients[j], restriction));
-            }
-
-            for (int lineIndex = 1; lineIndex < lines.Count - 1; lineIndex++)
-            {
-                model.Constraints.Add(ParseConstraint(lines[lineIndex], variableCount, lineIndex + 1));
-            }
-
-            if (model.Constraints.Count == 0)
-                throw new InvalidOperationException("The file contains no constraints.");
-
-            return model;
-        }
-
-        private static Constraint ParseConstraint(string line, int variableCount, int lineNumber)
-        {
-
-            string spaced = line
-                .Replace("<=", " <= ")
-                .Replace(">=", " >= ");
-
-            spaced = InsertSpacesAroundSingleEquals(spaced);
-
-            string[] tokens = SplitTokens(spaced);
-
-            int relationIndex = -1;
-            for (int i = 0; i < tokens.Length; i++)
-            {
-                if (tokens[i] == "<=" || tokens[i] == ">=" || tokens[i] == "=")
-                {
-                    relationIndex = i;
-                    break;
-                }
-            }
-
-            if (relationIndex == -1)
-                throw new InvalidOperationException(
-                    "Line " + lineNumber + " has no relation. Use <=, >= or =.");
-
-            if (relationIndex != variableCount)
-                throw new InvalidOperationException(
-                    "Line " + lineNumber + " has " + relationIndex + " coefficients but there are "
-                    + variableCount + " variables.");
-
-            if (relationIndex + 1 >= tokens.Length)
-                throw new InvalidOperationException(
-                    "Line " + lineNumber + " has no right hand side value.");
-
-            List<double> coefficients = new List<double>();
-            for (int i = 0; i < relationIndex; i++)
-                coefficients.Add(ParseSignedNumber(tokens[i], "technological coefficient on line " + lineNumber));
-
-            double rightHandSide = ParseSignedNumber(
-                tokens[relationIndex + 1], "right hand side on line " + lineNumber);
-
-            return new Constraint(coefficients, tokens[relationIndex], rightHandSide);
-        }
-
-        private static string InsertSpacesAroundSingleEquals(string text)
-        {
-            System.Text.StringBuilder builder = new System.Text.StringBuilder();
-
-            for (int i = 0; i < text.Length; i++)
-            {
-                if (text[i] == '=' && (i == 0 || (text[i - 1] != '<' && text[i - 1] != '>' && text[i - 1] != ' ')))
-                {
-                    builder.Append(' ').Append('=').Append(' ');
-                }
-                else
-                {
-                    builder.Append(text[i]);
-                }
-            }
-
-            return builder.ToString();
-        }
-
-        private static string[] SplitTokens(string line)
-        {
-            return line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-        }
-        private static double ParseSignedNumber(string token, string description)
-        {
-            string cleaned = token;
-
-            if (cleaned.StartsWith("+"))
-                cleaned = cleaned.Substring(1);
-
-            if (!double.TryParse(cleaned, NumberStyles.Float, CultureInfo.InvariantCulture, out double value))
-            {
-                throw new InvalidOperationException(
-                    "'" + token + "' is not a valid " + description + ".");
-            }
-
-            return value;
-        }
-
-        private static void DisplayModel(LPModel? model)
-        {
-            if (model == null)
+            if (problem == null)
             {
                 Console.WriteLine("  No model is loaded. Use option 1 first.");
                 return;
@@ -261,38 +123,42 @@ namespace LPR381Solver.Algorithms
 
             Console.WriteLine("  LOADED MODEL");
             Console.WriteLine("  ----------------------------------------------------");
-            Console.Write("  " + model.ObjectiveType + " z =");
+            Console.Write(problem.IsMaximization ? "  max z =" : "  min z =");
 
-            foreach (Variable variable in model.Variables)
+            for (int j = 0; j < problem.NumVariables; j++)
             {
                 Console.Write(string.Format(CultureInfo.InvariantCulture,
-                    " {0}{1:F3}{2}", variable.ObjectiveCoefficient >= 0 ? "+" : "-",
-                    Math.Abs(variable.ObjectiveCoefficient), variable.Name));
+                    " {0}{1:F3}x{2}", problem.ObjectiveCoeffs[j] >= 0 ? "+" : "-",
+                    Math.Abs(problem.ObjectiveCoeffs[j]), j + 1));
             }
             Console.WriteLine();
 
-            foreach (Constraint constraint in model.Constraints)
+            for (int i = 0; i < problem.NumConstraints; i++)
             {
                 Console.Write("  ");
-                for (int j = 0; j < constraint.Coefficients.Count; j++)
+                List<double> coefficients = problem.ConstraintCoeffs[i];
+
+                for (int j = 0; j < coefficients.Count; j++)
                 {
                     Console.Write(string.Format(CultureInfo.InvariantCulture,
-                        "{0}{1:F3}{2} ", constraint.Coefficients[j] >= 0 ? "+" : "-",
-                        Math.Abs(constraint.Coefficients[j]), model.Variables[j].Name));
+                        "{0}{1:F3}x{2} ", coefficients[j] >= 0 ? "+" : "-",
+                        Math.Abs(coefficients[j]), j + 1));
                 }
+
                 Console.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                    "{0} {1:F3}", constraint.Relation, constraint.RightHandSide));
+                    "{0} {1:F3}", problem.Relations[i], problem.Rhs[i]));
             }
 
             Console.Write("  Sign restrictions:");
-            foreach (Variable variable in model.Variables)
-                Console.Write(" " + variable.SignRestriction);
+            foreach (string restriction in problem.SignRestrictions)
+                Console.Write(" " + restriction);
             Console.WriteLine();
         }
 
-        private static void SolveKnapsack(LPModel? model)
+        /// <summary>Runs the Branch and Bound Knapsack algorithm on the loaded model.</summary>
+        private static void SolveKnapsack(LpProblem? problem)
         {
-            if (model == null)
+            if (problem == null)
             {
                 Console.WriteLine("  No model is loaded. Use option 1 first.");
                 return;
@@ -301,7 +167,7 @@ namespace LPR381Solver.Algorithms
             try
             {
                 KnapsackBranchAndBound solver = new KnapsackBranchAndBound();
-                solver.Solve(model);
+                solver.Solve(problem);
                 Console.WriteLine(solver.Log);
                 WriteOutputFile(solver.Log, "knapsack");
             }
@@ -312,9 +178,10 @@ namespace LPR381Solver.Algorithms
             }
         }
 
-        private static void SolveCuttingPlane(LPModel? model)
+        /// <summary>Runs the Cutting Plane algorithm on the loaded model.</summary>
+        private static void SolveCuttingPlane(LpProblem? problem)
         {
-            if (model == null)
+            if (problem == null)
             {
                 Console.WriteLine("  No model is loaded. Use option 1 first.");
                 return;
@@ -323,7 +190,7 @@ namespace LPR381Solver.Algorithms
             try
             {
                 CuttingPlane solver = new CuttingPlane();
-                solver.Solve(model);
+                solver.Solve(problem);
                 Console.WriteLine(solver.Log);
                 WriteOutputFile(solver.Log, "cuttingplane");
             }
@@ -333,6 +200,12 @@ namespace LPR381Solver.Algorithms
                 Console.WriteLine("  Reason: " + ex.Message);
             }
         }
+
+        /// <summary>
+        /// Writes the algorithm's full working to an output text file and tells the
+        /// user where it was written. All values are already rounded to three
+        /// decimals by the algorithms themselves.
+        /// </summary>
         private static void WriteOutputFile(string content, string algorithmName)
         {
             try
