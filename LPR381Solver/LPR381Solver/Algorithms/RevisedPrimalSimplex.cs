@@ -271,10 +271,10 @@ namespace LPR381Solver.Algorithms
                 throw new InvalidOperationException(
                     "A constraint has a different amount of coefficients than there are amount of variables"
                 );
-                if(constraint.Relation != "<=" && constraint.Realtion != ">=" && constraint.Relation != "=")
+                if(constraint.Relation != "<=" && constraint.Relation != ">=" && constraint.Relation != "=")
                 throw new InvalidOperationException(
                     "Constraint relation must be <=, >= or =");
-                )
+                
             }
         }
 
@@ -282,7 +282,7 @@ namespace LPR381Solver.Algorithms
         {
             _isMin = string.Equals(model.ObjectiveType, "min", StringComparison.OrdinalIgnoreCase);
             _originalVariables = model.Variables;
-            _variableMap = nnew Dictionary<int, List<ColumnRef>>();
+            _variableMap = new Dictionary<int, List<ColumnRef>>();
             _columnNames = new List<string>();
             List<double> costs = new List<double>();
 
@@ -291,7 +291,7 @@ namespace LPR381Solver.Algorithms
             {
                 Variable v = model.Variables[i];
                 string restriction = (v.SignRestriction ?? "+").Trim().ToLowerInvariant();
-                double workingCoeff = _isMin ? =v.ObjectiveCoefficient : v.ObjectiveCoefficient;
+                double workingCoeff = _isMin ? -v.ObjectiveCoefficient : v.ObjectiveCoefficient;
                 _variableMap[i] = new List<ColumnRef>();
 
                 switch(restriction)
@@ -311,7 +311,7 @@ namespace LPR381Solver.Algorithms
                         int col = _columnNames.Count;
                         _columnNames.Add(v.Name + "'"); 
                         costs.Add(-workingCoeff);
-                        _variableMap[i].Add(new Columnref { ColumnIndex = col, Multiplier = -1.0});
+                        _variableMap[i].Add(new ColumnRef { ColumnIndex = col, Multiplier = -1.0});
                         break;
                     }
                     case "urs":
@@ -328,7 +328,7 @@ namespace LPR381Solver.Algorithms
                     }
                     default:
                     throw new InvalidOperationException(
-                        "Unrecognised sign restriction '"+ v.SignRestrictions + "' for variable " + v.Name); 
+                        "Unrecognised sign restriction '"+ v.SignRestriction + "' for variable " + v.Name); 
 
                     }
                 }
@@ -395,7 +395,7 @@ namespace LPR381Solver.Algorithms
                     int col;
                     AddZeroColumn(fullRows, out col);
                     fullRows[rIdx][col] = 1.0;
-                    _columnNames.Add("s" + (rIdx =1));
+                    _columnNames.Add("s" + (rIdx + 1));
                     costs.Add(0.0);
                     basisColumns.Add(col);
                 }
@@ -408,9 +408,9 @@ namespace LPR381Solver.Algorithms
                     costs.Add(0.0);
 
                     int artificialCol;
-                    AddZeroColumn(fullRows, our artificialCol);
+                    AddZeroColumn(fullRows, out artificialCol);
                     fullRows[rIdx][artificialCol] = 1.0;
-                    _columnNames.Add("a" + (rIdx + 1)):
+                    _columnNames.Add("a" + (rIdx + 1));
                     costs.Add(-BigM);
                     basisColumns.Add(artificialCol);
                 }
@@ -426,7 +426,7 @@ namespace LPR381Solver.Algorithms
             }
 
             _n = _columnNames.Count;
-            _isArtificial= new bool[-n];
+            _isArtificial= new bool[_n];
             for (int j = 0; j<_n; j++) _isArtificial[j] = _columnNames[j].StartsWith("a");
 
             _A =new double[_m, _n];
@@ -435,12 +435,152 @@ namespace LPR381Solver.Algorithms
             _A[i,j] = fullRows[i][j];
 
             _b = rhsList.ToArray();
-            _c = costs.Toarray();
+            _c = costs.ToArray();
 
             _basis = basisColumns.ToArray();
             _Binv = new double[_m, _m];
             for (int i = 0; i < _m; i++) _Binv[i, i] = 1.0; 
             }
+
+            //Append a new only zeros col to every row and return the index of it
+            private static void AddZeroColumn(List<List<double>> rows, out int newColumnIndex)
+            {
+                newColumnIndex = rows[0].Count;
+                foreach(List<double> row in rows) row.Add(0.0);
+            }
+
+            //Small matrix  helpers
+            private static double[] RowVectorTimesMatrix(double[] row, double[,] matrix)
+            {
+                int m = row.Length;
+                double[] result = new double[m];
+                for (int j=0; j< m; j++)
+                {
+                    double sum =  0.0;
+                    for (int i=0; i<m;  i++) sum += row[i] * matrix[i,j];
+                    result[j] = sum;
+                }
+
+                return result;
+            }
+
+            private static double[] MatrixTimesVector(double[,] matrix, double[] vector)
+            {
+                int m = vector.Length;
+                double[] result = new double[m];
+                for (int i =0 ; i<m; i++)
+                {
+                    double sum =0.0;
+                    for(int k = 0; k<m; k++) sum += matrix[i,k] * vector[k];
+                    result[i] = sum;
+                }
+                return result;
+            }
+            
+            private static double[,] MatrixTimesMatrix(double[,] a, double[,] b)
+            {
+                int m = a.GetLength(0);
+                double[,] result = new double[m, m];
+                for (int i = 0; i < m; i++)
+                {
+                    for (int j = 0; j < m; j++)
+                    {
+                         double sum = 0.0;
+                         (int k = 0; k < m; k++) sum += a[i, k] * b[k, j];
+                        result[i, j] = sum;
+                    }
+                }
+                return result;
+            }
+
+            //Logging our helpers
+            private void WriteCanonicalForm()
+            {
+                _log.AppendLine("Canonical form (standard form with a slack or surplus or artificial):");
+                _log.Append(" ").Append(_isMin ?  "min" : "max").Append(" z = ");
+                for(int j = 0; j<_n; j++)
+                {
+                    if(Math.Abs(_c[j]) < Epsilon && _columnNames[j][0] != 'x') continue;
+                    _log.Append(string.Format(CultureInfo.InvariantCulture,
+                    " {0}{1:F3}{2}", _c[j] >= 0 ? "+" : "-", Math.Abs(_c[j]), _columnNames[j]));
+                }
+
+                _log.AppendLine();
+
+                for (int i = 0; i<_m; i++)
+                {
+                    _log.Append(" ");
+                    for (int j = 0; j < _n; j++)
+				{
+					if (Math.Abs(_A[i, j]) < Epsilon) continue;
+					_log.Append(string.Format(CultureInfo.InvariantCulture,
+						" {0}{1:F3}{2}", _A[i, j] >= 0 ? "+" : "-", Math.Abs(_A[i, j]), _columnNames[j]));
+				}
+				_log.AppendLine(string.Format(CultureInfo.InvariantCulture, " = {0:F3}", _b[i]));
+			    }
+                _log.AppendLine();
+
+                _log.AppendLine("Initial basis:" + string.Join(",", _basis.Select(b=> _columnNames[b])));
+                _log.AppendLine(string.Format(CultureInfo.InvariantCulture, "Big-M value used: {0:F0}", BigM));
+                _log.AppendLine();
+            }
+
+            private void WriteProductForm(double[,] matrix, string title)
+            {
+                _log.AppendLine(title +  ":");
+                int rows = matrix.GetLength(0);
+                int cols = matrix.GetLength(1);
+                for(int i =0; i<rows; i++)
+                {
+                    _log.Append(" [");
+                    for(int j = 0; j<cols; j++)
+                    {
+                        _log.Append(matrix[i,j].ToString("F3", CultureInfo.InvariantCulture).PadLeft(9));
+                        if(j<cols -1) _log.Append(" ");
+                    }
+                    _log.AppendLine("]");
+                }
+                _log.AppendLine();
+            }
+
+            private void WriteVector(double[] vector, string title)
+            {
+                _log.Append(title + ": [");
+                for(int i = 0; i<vector.Length; i++)
+                {
+                    _log.Append(vector[i].ToString("F3", CultureInfo.InvariantCulture));
+                    if(i<vector.Length - 1) _log.Append(", ");
+                }
+                _log.AppendLine("]");
+                _log.AppendLine();
+            }
+
+            private void WriteReducedCosts(double[] reducedCosts, bool[] isBasicCol, string title)
+            {
+                _log.AppendLine(title + ":");
+                for (int j = 0; j<_n; j++)
+                {
+                    if (isBasicCol[j]) continue;
+                    _log.AppendLine(" " + _columnNames[j].PadRight(8)+ " : "+
+                    reducedCosts[j].ToString("F3", CultureInfo.InvariantCulture));
+                }
+                _log.AppendLine();
+            }
+
+            private void WriteFinalSummary()
+            {
+                _log.AppendLine("----------------------------");
+                _log.AppendLine(" RESULT : "+Status);
+                _log.AppendLine("----------------------------");
+
+                if (Status == "Optimal")
+                {
+                    foreach(KeyValuePair<string, double> kv in VariableValues)
+                    _log.AppendLine(string.Format(CultureInfo.InvariantCulture, " {0} = {1:F3}", kv.Key, kv.Value));
+                    _log.AppendLine(string.Format(CultureInfo.InvariantCulture, " Objective value z = {0:F3}", ObjectiveValue));
+                }
+            }
+            }
+            
         }
-    }
-}
+
