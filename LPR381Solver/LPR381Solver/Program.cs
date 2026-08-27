@@ -1,14 +1,18 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Linq;
+using LPR381Solver.Algorithms;
 using LPR381Solver.IO;
 using LPR381Solver.Models;
 using LPR381Solver.Services;
 
 namespace LPR381Solver
 {
-    internal class Program
+    internal static class Program
     {
-        static void Main(string[] args)
+        private enum AlgorithmChoice
         {
             PrimalSimplex = 1,
             RevisedPrimalSimplex = 2,
@@ -20,7 +24,10 @@ namespace LPR381Solver
         private static LpProblem? _loadedProblem;
         private static CanonicalProblem? _canonicalForm;
         private static PrimalSimplexSolver.Result? _lastResult;
+        private static string? _lastTextLog;
         private static AlgorithmChoice _selectedAlgorithm = AlgorithmChoice.PrimalSimplex;
+        private static readonly SensitivityAnalysisService Sensitivity = new();
+        private static readonly DualityService Duality = new();
 
         private static void Main(string[] args)
         {
@@ -31,26 +38,13 @@ namespace LPR381Solver
 
                 switch (choice)
                 {
-                    case "1":
-                        LoadFile();
-                        break;
-                    case "2":
-                        SelectAlgorithm();
-                        break;
-                    case "3":
-                        SolveModel();
-                        break;
-                    case "4":
-                        ShowSensitivityMenu();
-                        break;
-                    case "5":
-                        ExportResults();
-                        break;
-                    case "6":
-                        return;
-                    default:
-                        ShowError("Invalid menu selection. Please enter a number from 1 to 6.");
-                        break;
+                    case "1": LoadFile(); break;
+                    case "2": SelectAlgorithm(); break;
+                    case "3": SolveModel(); break;
+                    case "4": ShowSensitivityMenu(); break;
+                    case "5": ExportResults(); break;
+                    case "6": return;
+                    default: ShowError("Invalid menu selection. Please enter a number from 1 to 6."); break;
                 }
             }
         }
@@ -63,15 +57,23 @@ namespace LPR381Solver
             Console.WriteLine("============================================================");
             Console.WriteLine($"Loaded model : {(_loadedProblem == null ? "None" : $"{_loadedProblem.NumVariables} vars, {_loadedProblem.NumConstraints} constraints")}");
             Console.WriteLine($"Algorithm    : {GetAlgorithmName(_selectedAlgorithm)}");
+            Console.WriteLine($"Last status  : {GetLastStatus()}");
             Console.WriteLine("------------------------------------------------------------");
             Console.WriteLine("1. Load Programming Model");
             Console.WriteLine("2. Select Algorithm");
             Console.WriteLine("3. Solve Model");
-            Console.WriteLine("4. Sensitivity Analysis");
+            Console.WriteLine("4. Sensitivity Analysis & Duality");
             Console.WriteLine("5. Export Results");
             Console.WriteLine("6. Exit");
             Console.WriteLine("============================================================");
             Console.Write("Select an option (1-6): ");
+        }
+
+        private static string GetLastStatus()
+        {
+            if (_lastResult != null) return _lastResult.Status.ToString();
+            if (_lastTextLog != null) return "Solved";
+            return "Not solved";
         }
 
         private static void LoadFile()
@@ -101,10 +103,10 @@ namespace LPR381Solver
                 _loadedProblem = problem;
                 _canonicalForm = canonical;
                 _lastResult = null;
+                _lastTextLog = null;
 
-                Console.WriteLine();
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"[SUCCESS] Loaded {problem.NumVariables} decision variables and {problem.NumConstraints} original constraints.");
+                Console.WriteLine($"\n[SUCCESS] Loaded {problem.NumVariables} decision variables and {problem.NumConstraints} original constraints.");
                 Console.ResetColor();
                 Pause();
             }
@@ -144,22 +146,30 @@ namespace LPR381Solver
                 return;
             }
 
-            if (_selectedAlgorithm != AlgorithmChoice.PrimalSimplex)
-            {
-                ShowError(
-                    $"{GetAlgorithmName(_selectedAlgorithm)} is an integration point for the group member responsible for that algorithm. " +
-                    "Select Primal Simplex to run Person A's solver in this branch.");
-                return;
-            }
-
             try
             {
-                var solver = new PrimalSimplexSolver();
-                _lastResult = solver.Solve(_canonicalForm);
+                switch (_selectedAlgorithm)
+                {
+                    case AlgorithmChoice.PrimalSimplex:
+                        SolveWithPrimalSimplex();
+                        break;
 
-                Console.Clear();
-                Console.WriteLine(_lastResult.ExecutionLog);
-                Pause();
+                    case AlgorithmChoice.CuttingPlane:
+                        SolveWithCuttingPlane();
+                        break;
+
+                    case AlgorithmChoice.BranchAndBoundKnapsack:
+                        SolveWithKnapsack();
+                        break;
+
+                    default:
+                        ShowError($"{GetAlgorithmName(_selectedAlgorithm)} has not been integrated yet by the group member responsible for that algorithm.");
+                        break;
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                ShowError($"This model cannot be solved with {GetAlgorithmName(_selectedAlgorithm)}. {ex.Message}");
             }
             catch (Exception ex)
             {
@@ -167,9 +177,46 @@ namespace LPR381Solver
             }
         }
 
+        private static void SolveWithPrimalSimplex()
+        {
+            var solver = new PrimalSimplexSolver();
+            _lastResult = solver.Solve(_canonicalForm!);
+            _lastTextLog = _lastResult.ExecutionLog;
+
+            Console.Clear();
+            Console.WriteLine(_lastResult.ExecutionLog);
+            Pause();
+        }
+
+        private static void SolveWithCuttingPlane()
+        {
+            var solver = new CuttingPlane();
+            solver.Solve(_loadedProblem!);
+
+            _lastResult = null;
+            _lastTextLog = solver.Log;
+
+            Console.Clear();
+            Console.WriteLine(solver.Log);
+            Pause();
+        }
+
+        private static void SolveWithKnapsack()
+        {
+            var solver = new KnapsackBranchAndBound();
+            solver.Solve(_loadedProblem!);
+
+            _lastResult = null;
+            _lastTextLog = solver.Log;
+
+            Console.Clear();
+            Console.WriteLine(solver.Log);
+            Pause();
+        }
+
         private static void ExportResults()
         {
-            if (_lastResult == null)
+            if (_lastResult == null && _lastTextLog == null)
             {
                 ShowError("There are no solved results to export. Solve a model first.");
                 return;
@@ -188,7 +235,11 @@ namespace LPR381Solver
 
             try
             {
-                OutputWriter.WriteResult(path, _lastResult);
+                if (_lastResult != null)
+                    OutputWriter.WriteResult(path, _lastResult);
+                else
+                    File.WriteAllText(path, _lastTextLog);
+
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine($"\n[SUCCESS] Results exported to: {Path.GetFullPath(path)}");
                 Console.ResetColor();
@@ -202,24 +253,257 @@ namespace LPR381Solver
 
         private static void ShowSensitivityMenu()
         {
+            if (_loadedProblem == null || _lastResult == null ||
+                _lastResult.Status != PrimalSimplexSolver.SolutionStatus.Optimal)
+            {
+                ShowError("Sensitivity analysis requires a loaded model with an optimal Primal Simplex solution.");
+                return;
+            }
+
+            while (true)
+            {
+                Console.Clear();
+                Console.WriteLine("============================================================");
+                Console.WriteLine("             SENSITIVITY ANALYSIS & DUALITY");
+                Console.WriteLine("============================================================");
+                Console.WriteLine(" 1. Display range of selected Non-Basic Variable");
+                Console.WriteLine(" 2. Apply change to selected Non-Basic Variable");
+                Console.WriteLine(" 3. Display range of selected Basic Variable");
+                Console.WriteLine(" 4. Apply change to selected Basic Variable");
+                Console.WriteLine(" 5. Display range of selected constraint RHS");
+                Console.WriteLine(" 6. Apply change to selected constraint RHS");
+                Console.WriteLine(" 7. Display range of coefficient in Non-Basic Variable column");
+                Console.WriteLine(" 8. Apply change to coefficient in Non-Basic Variable column");
+                Console.WriteLine(" 9. Add a new activity to the optimal solution");
+                Console.WriteLine("10. Add a new constraint to the optimal solution");
+                Console.WriteLine("11. Display shadow prices");
+                Console.WriteLine("12. Apply Duality / display the Dual Programming Model");
+                Console.WriteLine("13. Solve the Dual Programming Model");
+                Console.WriteLine("14. Verify Strong / Weak Duality");
+                Console.WriteLine(" 0. Return to main menu");
+                Console.WriteLine("============================================================");
+                Console.Write("Select an option (0-14): ");
+
+                string choice = (Console.ReadLine() ?? string.Empty).Trim();
+                if (choice == "0") return;
+
+                try
+                {
+                    switch (choice)
+                    {
+                        case "1": DisplayObjectiveRange(mustBeBasic: false); break;
+                        case "2": ApplyObjectiveChange(mustBeBasic: false); break;
+                        case "3": DisplayObjectiveRange(mustBeBasic: true); break;
+                        case "4": ApplyObjectiveChange(mustBeBasic: true); break;
+                        case "5": DisplayRhsRange(); break;
+                        case "6": ApplyRhsChange(); break;
+                        case "7": DisplayNonBasicColumnRange(); break;
+                        case "8": ApplyNonBasicColumnChange(); break;
+                        case "9": AddNewActivity(); break;
+                        case "10": AddNewConstraint(); break;
+                        case "11": DisplayShadowPrices(); break;
+                        case "12": DisplayDualModel(); break;
+                        case "13": SolveDualModel(); break;
+                        case "14": VerifyDuality(); break;
+                        default: ShowError("Invalid sensitivity selection."); break;
+                    }
+                }
+                catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException || ex is FormatException)
+                {
+                    ShowError(ex.Message);
+                }
+
+                if (_lastResult == null || _lastResult.Status != PrimalSimplexSolver.SolutionStatus.Optimal)
+                    return;
+            }
+        }
+
+        private static void DisplayObjectiveRange(bool mustBeBasic)
+        {
+            int variable = ReadVariableNumber();
+            SensitivityAnalysisService.RangeResult range = mustBeBasic
+                ? Sensitivity.GetBasicVariableObjectiveRange(_lastResult!, variable)
+                : Sensitivity.GetNonBasicVariableObjectiveRange(_lastResult!, variable);
             Console.Clear();
-            Console.WriteLine("=== SENSITIVITY ANALYSIS ===");
-            Console.WriteLine(" 1. Display range of selected Non-Basic Variable");
-            Console.WriteLine(" 2. Apply change to selected Non-Basic Variable");
-            Console.WriteLine(" 3. Display range of selected Basic Variable");
-            Console.WriteLine(" 4. Apply change to selected Basic Variable");
-            Console.WriteLine(" 5. Display range of constraint RHS");
-            Console.WriteLine(" 6. Apply change to constraint RHS");
-            Console.WriteLine(" 7. Display range of variable in Non-Basic column");
-            Console.WriteLine(" 8. Apply change to variable in Non-Basic column");
-            Console.WriteLine(" 9. Add new activity");
-            Console.WriteLine("10. Add new constraint");
-            Console.WriteLine("11. Display shadow prices");
-            Console.WriteLine("12. Duality operations");
-            Console.WriteLine();
-            Console.WriteLine("Sensitivity calculations are provided by the group member responsible for that section.");
-            Console.WriteLine("This menu is the shell/integration point required by Person A.");
+            Console.WriteLine("=== OBJECTIVE COEFFICIENT RANGE ===");
+            Console.WriteLine(range);
             Pause();
+        }
+
+        private static void ApplyObjectiveChange(bool mustBeBasic)
+        {
+            int variable = ReadVariableNumber();
+            _ = mustBeBasic
+                ? Sensitivity.GetBasicVariableObjectiveRange(_lastResult!, variable)
+                : Sensitivity.GetNonBasicVariableObjectiveRange(_lastResult!, variable);
+
+            double newValue = ReadDouble("Enter new objective coefficient: ");
+            ApplyChange(Sensitivity.ApplyObjectiveCoefficientChange(_lastResult!, variable, newValue));
+        }
+
+        private static void DisplayRhsRange()
+        {
+            int constraint = ReadConstraintNumber();
+            var range = Sensitivity.GetRhsRange(_lastResult!, constraint);
+            Console.Clear();
+            Console.WriteLine("=== RHS RANGE ===");
+            Console.WriteLine(range);
+            Pause();
+        }
+
+        private static void ApplyRhsChange()
+        {
+            int constraint = ReadConstraintNumber();
+            double newValue = ReadDouble("Enter new RHS value: ");
+            ApplyChange(Sensitivity.ApplyRhsChange(_lastResult!, constraint, newValue));
+        }
+
+        private static void DisplayNonBasicColumnRange()
+        {
+            int variable = ReadVariableNumber();
+            int constraint = ReadConstraintNumber();
+            var range = Sensitivity.GetNonBasicColumnCoefficientRange(_lastResult!, constraint, variable);
+            Console.Clear();
+            Console.WriteLine("=== NON-BASIC COLUMN COEFFICIENT RANGE ===");
+            Console.WriteLine(range);
+            Pause();
+        }
+
+        private static void ApplyNonBasicColumnChange()
+        {
+            int variable = ReadVariableNumber();
+            int constraint = ReadConstraintNumber();
+            double newValue = ReadDouble("Enter new technological coefficient: ");
+            ApplyChange(Sensitivity.ApplyNonBasicColumnCoefficientChange(
+                _lastResult!, constraint, variable, newValue));
+        }
+
+        private static void AddNewActivity()
+        {
+            double objective = ReadDouble("Objective coefficient of the new activity: ");
+            var coefficients = new List<double>();
+            for (int i = 0; i < _loadedProblem!.NumConstraints; i++)
+                coefficients.Add(ReadDouble($"Coefficient in constraint {i + 1}: "));
+            string restriction = ReadSignRestriction();
+
+            ApplyChange(Sensitivity.AddNewActivity(_lastResult!, objective, coefficients, restriction));
+        }
+
+        private static void AddNewConstraint()
+        {
+            var coefficients = new List<double>();
+            for (int j = 0; j < _loadedProblem!.NumVariables; j++)
+                coefficients.Add(ReadDouble($"Coefficient of x{j + 1}: "));
+            string relation = ReadRelation();
+            double rhs = ReadDouble("RHS value: ");
+
+            ApplyChange(Sensitivity.AddNewConstraint(_lastResult!, coefficients, relation, rhs));
+        }
+
+        private static void DisplayShadowPrices()
+        {
+            var prices = Sensitivity.GetShadowPrices(_lastResult!);
+            Console.Clear();
+            Console.WriteLine("=== SHADOW PRICES ===");
+            foreach (var price in prices)
+                Console.WriteLine($"Constraint {price.ConstraintNumber}: {F3(price.ShadowPrice)}");
+            Console.WriteLine("\nShadow prices are marginal objective changes per one-unit RHS increase while the current basis remains valid.");
+            Pause();
+        }
+
+        private static void DisplayDualModel()
+        {
+            DualityService.DualBuildResult build = Duality.BuildDual(_loadedProblem!);
+            Console.Clear();
+            Console.WriteLine(build.Description);
+            Pause();
+        }
+
+        private static void SolveDualModel()
+        {
+            DualityService.DualSolveResult solved = Duality.SolveDual(_loadedProblem!);
+            Console.Clear();
+            Console.WriteLine(solved.Build.Description);
+            Console.WriteLine(solved.Result.ExecutionLog);
+            Pause();
+        }
+
+        private static void VerifyDuality()
+        {
+            DualityService.VerificationResult verification = Duality.VerifyDuality(_loadedProblem!);
+            Console.Clear();
+            Console.WriteLine("=== DUALITY VERIFICATION ===");
+            Console.WriteLine($"Primal status    : {verification.PrimalResult.Status}");
+            Console.WriteLine($"Dual status      : {verification.DualResult.Status}");
+            if (verification.PrimalResult.Status == PrimalSimplexSolver.SolutionStatus.Optimal)
+                Console.WriteLine($"Primal objective : {F3(verification.PrimalResult.ObjectiveValue)}");
+            if (verification.DualResult.Status == PrimalSimplexSolver.SolutionStatus.Optimal)
+                Console.WriteLine($"Dual objective   : {F3(verification.DualResult.ObjectiveValue)}");
+            Console.WriteLine($"Weak duality     : {(verification.WeakDualitySatisfied ? "Satisfied" : "Not verified")}");
+            Console.WriteLine($"Strong duality   : {(verification.StrongDualitySatisfied ? "Satisfied" : "Not verified")}");
+            Console.WriteLine();
+            Console.WriteLine(verification.Message);
+            Pause();
+        }
+
+        private static void ApplyChange(SensitivityAnalysisService.ChangeResult change)
+        {
+            _loadedProblem = change.ModifiedProblem;
+            _canonicalForm = change.SolverResult.CanonicalProblem ?? CanonicalConverter.ToCanonicalForm(change.ModifiedProblem);
+            _lastResult = change.SolverResult;
+            _lastTextLog = change.SolverResult.ExecutionLog;
+
+            Console.Clear();
+            Console.WriteLine("=== APPLIED CHANGE ===");
+            Console.WriteLine(change.Description);
+            Console.WriteLine();
+            Console.WriteLine(change.SolverResult.ExecutionLog);
+            Pause();
+        }
+
+        private static int ReadVariableNumber()
+        {
+            int count = _loadedProblem!.NumVariables;
+            Console.Write($"Select decision variable x1-x{count} (enter number 1-{count}): ");
+            if (!int.TryParse(Console.ReadLine(), out int number) || number < 1 || number > count)
+                throw new ArgumentException("Invalid decision-variable number.");
+            return number - 1;
+        }
+
+        private static int ReadConstraintNumber()
+        {
+            int count = _loadedProblem!.NumConstraints;
+            Console.Write($"Select original constraint (1-{count}): ");
+            if (!int.TryParse(Console.ReadLine(), out int number) || number < 1 || number > count)
+                throw new ArgumentException("Invalid constraint number.");
+            return number - 1;
+        }
+
+        private static double ReadDouble(string prompt)
+        {
+            Console.Write(prompt);
+            string raw = (Console.ReadLine() ?? string.Empty).Trim();
+            if (!double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double value))
+                throw new ArgumentException($"'{raw}' is not a valid number. Use a decimal point if required.");
+            return value;
+        }
+
+        private static string ReadRelation()
+        {
+            Console.Write("Constraint relation (<=, >=, =): ");
+            string relation = (Console.ReadLine() ?? string.Empty).Trim();
+            if (relation is not ("<=" or ">=" or "="))
+                throw new ArgumentException("Relation must be <=, >= or =.");
+            return relation;
+        }
+
+        private static string ReadSignRestriction()
+        {
+            Console.Write("Sign restriction (+, -, urs, int, bin): ");
+            string restriction = (Console.ReadLine() ?? string.Empty).Trim().ToLowerInvariant();
+            if (restriction is not ("+" or "-" or "urs" or "int" or "bin"))
+                throw new ArgumentException("Sign restriction must be +, -, urs, int or bin.");
+            return restriction;
         }
 
         private static string GetAlgorithmName(AlgorithmChoice choice) => choice switch
