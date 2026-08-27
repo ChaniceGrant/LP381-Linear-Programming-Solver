@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using LPR381Solver.Models;
+using System.Globalization; 
 
 namespace LPR381Solver.Algorithms
 {
@@ -237,7 +239,7 @@ namespace LPR381Solver.Algorithms
             }
 
             VariableValues = new Dictionary<string, double>();
-            double objectvie = 0.0;
+            double objective = 0.0;
             for(int i = 0; i<_originalVariables.Count; i ++)
             {
                 double value = 0.0;
@@ -346,7 +348,7 @@ namespace LPR381Solver.Algorithms
                 for(int i = 0; i < model.Variables.Count; i ++)
                 {
                     double a = constraint. Coefficients[i];
-                    foreach (Columnref refCol in _variableMap[i])
+                    foreach (ColumnRef refCol in _variableMap[i])
                     row[refCol.ColumnIndex] += a*refCol.Multiplier;
                 }
 
@@ -486,7 +488,7 @@ namespace LPR381Solver.Algorithms
                     for (int j = 0; j < m; j++)
                     {
                          double sum = 0.0;
-                         (int k = 0; k < m; k++) sum += a[i, k] * b[k, j];
+                         for (int k = 0; k < m; k++) sum += a[i, k] * b[k, j];
                         result[i, j] = sum;
                     }
                 }

@@ -3,10 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using LPR381Solver.Models;
+using System.Globalization; 
 
 namespace LPR381Solver.Algorithms
 {
-    internal class SimplexBranchNode
+    public class SimplexBranchNode
     {
         public string Label { get; set; }
         public List<Constraint> ExtraConstraints { get; set; }
@@ -31,23 +33,18 @@ namespace LPR381Solver.Algorithms
         private LPModel _rootModel;
         private List<int> _integerVarIndices;
         private bool _isMax;
-
         private double _bestObjective;
-        private List<int> _integerVarIndices;
-        private bool _isMaxl
         
-
-        private double _bestObjective;
         private Dictionary<string, double> _bestSolution;
 
-        private readonly List<SimpleBranchNode> _nodes = new List<SimplexBranchNode>();
+        private readonly List<SimplexBranchNode> _nodes = new List<SimplexBranchNode>();
         private readonly StringBuilder _log = new StringBuilder();
 
         public IReadOnlyList<SimplexBranchNode> Nodes => _nodes;
-        public double Best Objecteve => _bestObjective;
+        public double BestObjective => _bestObjective;
         public Dictionary<string, double> BestSolution => _bestSolution;
         public string Status { get; private set; }
-        pulic string Log => _log.ToString();
+        public string Log => _log.ToString();
 
         public void Solve(LPModel model)
         {
@@ -95,7 +92,7 @@ namespace LPR381Solver.Algorithms
                 ProcessNode(node, stack);
             }
 
-            Status = _bestSolution != null ? "Optimal" + "Feasible solution found";
+            Status = _bestSolution != null ? "Optimal" : "Feasible solution found";
             WriteBestCandidate();
         }
 
@@ -206,7 +203,7 @@ namespace LPR381Solver.Algorithms
             {
                 new Constraint(unitCoeffs, "<=", floorVal)
             };
-            List<Constraints> ceilExtras =  new List<Constraints(node.ExtraConstraints)
+            List<Constraint> ceilExtras =  new List<Constraint>(node.ExtraConstraints)
             {
                 new Constraint(new List<double>(unitCoeffs), ">=", ceilVal)
             };
@@ -239,14 +236,14 @@ namespace LPR381Solver.Algorithms
 			return coeffs;
 		}
  
-		private string DescribeBoundConstraint(Constraint c)
+		private string DescribeBoundConstraints(Constraint c)
 		{
 			int idx = c.Coefficients.FindIndex(v => Math.Abs(v) > Epsilon);
 			string varName = idx >= 0 ? _rootModel.Variables[idx].Name : "?";
 			return varName + " " + c.Relation + " " + c.RightHandSide.ToString("F3", CultureInfo.InvariantCulture);
 		}
  
-		private void SolveAsPlainLp()
+		private void SolveAsPlainLP()
 		{
 			RevisedPrimalSimplex solver = new RevisedPrimalSimplex();
 			solver.Solve(_rootModel);
