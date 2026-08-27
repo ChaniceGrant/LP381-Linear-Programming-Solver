@@ -11,13 +11,14 @@ namespace LPR381Solver.Algorithms
 		public static void RunAll()
 		{
 			RunKnapsackCrossCheck();
-			RunTextbookInteger();
+			RunTestInteger();
 			RunInfeasible();
 		}
 
 		public static void RunKnapsackCrossCheck()
 		{
-			Console.WriteLine("### CASE 1: Brief's knapsack IP, cross-checked against KnapsackBranchAndBound");
+			Console.WriteLine("### CASE 1: Knapsack Cross Check");
+			Console.WriteLine("--------------------------------------------------");
 			Console.WriteLine();
  
 			LPModel model = new LPModel();
@@ -32,9 +33,10 @@ namespace LPR381Solver.Algorithms
 			Run(model);
 		}
  
-		public static void RunTextbookInteger()
+		public static void RunTestInteger()
 		{
-			Console.WriteLine("### CASE 2: Pure IP, LP relaxation is fractional");
+			Console.WriteLine("### CASE 2: Pure IP");
+			Console.WriteLine("--------------------------------------------------");
 			Console.WriteLine();
  
 			LPModel model = new LPModel();
@@ -50,7 +52,8 @@ namespace LPR381Solver.Algorithms
  
 		public static void RunInfeasible()
 		{
-			Console.WriteLine("### CASE 3: Infeasible at the root (no branching should occur)");
+			Console.WriteLine("### CASE 3: Infeasible problem (can't branch))");
+			Console.WriteLine("--------------------------------------------------");
 			Console.WriteLine();
  
 			LPModel model = new LPModel();
@@ -71,13 +74,13 @@ namespace LPR381Solver.Algorithms
 				BranchAndBoundSimplex solver = new BranchAndBoundSimplex();
 				solver.Solve(model);
 				Console.WriteLine(solver.Log);
-				Console.WriteLine("Status: " + solver.Status);
+				Console.WriteLine("Status : " + solver.Status);
 				Console.WriteLine();
 			}
 			catch (InvalidOperationException ex)
 			{
-				Console.WriteLine("This model could not be solved.");
-				Console.WriteLine("Reason: " + ex.Message);
+				Console.WriteLine("This model is not solveable");
+				Console.WriteLine("Why: " + ex.Message);
 				Console.WriteLine();
 			}
 		}
