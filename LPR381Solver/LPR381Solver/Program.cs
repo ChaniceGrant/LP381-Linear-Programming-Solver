@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -158,6 +158,14 @@ namespace LPR381Solver
                         SolveWithCuttingPlane();
                         break;
 
+                    case AlgorithmChoice.RevisedPrimalSimplex:
+                        SolveWithRevisedPrimalSimplex();
+                        break;
+
+                    case AlgorithmChoice.BranchAndBoundSimplex:
+                        SolveWithBranchAndBoundSimplex();
+                        break;
+
                     case AlgorithmChoice.BranchAndBoundKnapsack:
                         SolveWithKnapsack();
                         break;
@@ -185,6 +193,34 @@ namespace LPR381Solver
 
             Console.Clear();
             Console.WriteLine(_lastResult.ExecutionLog);
+            Pause();
+        }
+
+        private static void SolveWithRevisedPrimalSimplex()
+        {
+
+            var solver = new RevisedPrimalSimplex();
+            solver.Solve(_loadedProblem!);
+
+            _lastResult = null;
+            _lastTextLog = solver.Log;
+            
+            Console.Clear();
+            Console.WriteLine(solver.Log);
+            Pause();
+
+        }
+
+        private static void SolveWithBranchAndBoundSimplex()
+        {
+            var solver = new BranchAndBoundSimplex();
+            solver.Solve(_loadedProblem!);
+
+            _lastResult = null;
+            _lastTextLog = solver.Log;
+
+            Console.Clear();
+            Console.WriteLine(solver.Log);
             Pause();
         }
 

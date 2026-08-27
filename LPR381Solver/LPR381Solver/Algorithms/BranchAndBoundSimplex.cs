@@ -46,6 +46,33 @@ namespace LPR381Solver.Algorithms
         public string Status { get; private set; }
         public string Log => _log.ToString();
 
+        public void Solve(LpProblem problem)
+        {
+            LPModel model = ConvertToLPModel(problem);
+            Solve(model);
+        }
+
+        private static LPModel ConvertToLPModel(LpProblem lp)
+        {
+            LPModel model = new LPModel();
+            model.ObjectiveType = lp.IsMaximization ? "max" : "min";
+
+            for(int i = 0; i < lp.ObjectiveCoeffs.Count; i ++)
+            {
+                string name = "x" + (i+1);
+                string sign = (lp.SignRestrictions != null && i < lp.SignRestrictions.Count)
+                    ? lp.SignRestrictions[i] : "+";
+                model.Variables.Add(new Variable(name, lp.ObjectiveCoeffs[i], sign));
+            }
+
+            for (int i = 0; i < lp.ConstraintCoeffs.Count; i++)
+            {
+                model.Constraints.Add(new Constraint(
+                    new List<double>(lp.ConstraintCoeffs[i]),  lp.Relations[i], lp.Rhs[i]));
+            }
+            return model;
+        }
+
         public void Solve(LPModel model)
         {
             Validate(model);
