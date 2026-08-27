@@ -1,9 +1,6 @@
-undsimplexdemo · CS
 using System;
 using System.Collections.Generic;
 using LPR381Solver.Models;
-using System.Globalization; 
- 
  
 namespace LPR381Solver.Algorithms
 {

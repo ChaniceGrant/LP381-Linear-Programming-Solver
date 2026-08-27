@@ -183,7 +183,7 @@ namespace LPR381Solver.Algorithms
                     _bestObjective = bound;
                     _bestSolution = new Dictionary<string, double>(solver.VariableValues);
                     _log.AppendLine(string.Format(CultureInfo.InvariantCulture,
-                    "  -> New best candidate. z = {0,F3}", _bestObjective));
+                    "  -> New best candidate. z = {0:F3}", _bestObjective));
                     _log.AppendLine();
                 }
                 return;
@@ -194,7 +194,7 @@ namespace LPR381Solver.Algorithms
             double ceilVal = Math.Ceiling(fractionalValue);
 
             node.Status = string.Format(CultureInfo.InvariantCulture,
-            "BRANCH on {0} (fractional value {1;F3})", branchVarName, fractionalValue);
+            "BRANCH on {0} (fractional value {1:F3})", branchVarName, fractionalValue);
             WriteNodeResult(node);
 
             List<double> unitCoeffs = BuildUnitCoefficients(fractionalIndex);

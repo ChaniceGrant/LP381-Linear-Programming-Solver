@@ -49,7 +49,7 @@ namespace LPR381Solver.Algorithms
             LPModel model = new LPModel();
             model.ObjectiveType = "max";
             model.Variables.Add(new Variable("x1", 1, "+"));
-            mdoel.Variables.Add(new Variable("x2", 1, "+"));
+            model.Variables.Add(new Variable("x2", 1, "+"));
 
             model.Constraints.Add(new Constraint(new List<double> { 1,1 }, "<=", 2));
             model.Constraints.Add(new Constraint(new List<double> { 1,1 }, ">=", 10));
