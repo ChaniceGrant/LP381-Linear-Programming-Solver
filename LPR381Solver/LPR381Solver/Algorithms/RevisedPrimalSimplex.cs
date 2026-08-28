@@ -10,7 +10,7 @@ namespace LPR381Solver.Algorithms
 {
     public class RevisedPrimalSimplex
     {
-        //1. DECLARE VARIABLES
+        //1. DECLARE VARIABLS
         private const double Epsilon = 1e-9;
         private const int MaxIterations = 500;
         private const double BigM = 1000000.0; 
@@ -23,16 +23,12 @@ namespace LPR381Solver.Algorithms
         private int _m;
         private int _n;
 
-
-        //'Bookkeeping' Class:
-        //Keeps track  of when an original variable becomes a multiple standard-form columns
+        //this class is in charge of keeping track  of when an original variable becomes a multiple standard-form columns
         private class ColumnRef
         {
             public int ColumnIndex;
             public double Multiplier;
         }
-
-        //originalVariables keep track of the original Variable objects
         private List<Variable> _originalVariables;
         private Dictionary<int, List<ColumnRef>> _variableMap;
 
@@ -73,12 +69,8 @@ namespace LPR381Solver.Algorithms
                 
                 double[] cB = _basis.Select(colIndex => _c[colIndex]).ToArray();
                 double[] y = RowVectorTimesMatrix(cB, _Binv);
-
-                //display so user can keep up with process
                 WriteProductForm(_Binv, "B^-1 (current)");
                 WriteVector(y, "y = cB . B^-1 (simplex multipliers)");
-
-                //Reduced cost for every non-basic column
                 int entering = -1;
                 double bestReducedCost = Epsilon;
                 double[] reducedCosts = new double[_n];
@@ -133,7 +125,7 @@ namespace LPR381Solver.Algorithms
                 }
                 double[] xB = MatrixTimesVector(_Binv, _b);
 
-                //Ratio Test
+                //ratio tst
                 int leavingRow = -1;
                 double bestRatio = double.PositiveInfinity;
                 _log.AppendLine("Ratio test:");
@@ -177,7 +169,7 @@ namespace LPR381Solver.Algorithms
                 + ")");
                 _log.AppendLine();
 
-                //Product form update: Binv_new = E * Binv
+                //product form update: Binv_new = E * Binv
                 double pivot = d[leavingRow];
                 double[,] eta = new double[_m, _m];
                 for(int i = 0; i < _m; i++)
@@ -211,7 +203,7 @@ namespace LPR381Solver.Algorithms
                 return;
             }
 
-            //Check feasibility
+            //check our feasibility
             //if an a varibale is lefte basic +  a positive value = infeasible
             double[] finalXB = MatrixTimesVector(_Binv, _b);
             for(int i = 0; i < _m; i++)
@@ -231,7 +223,7 @@ namespace LPR381Solver.Algorithms
 
             if (Status == null) Status = "Optimal";
 
-            //Reconstructing variable values from standard-form solution
+            //reconstructing variable values from standard-form solution
             double[] xStandard = new double[_n];
             for (int i = 0; i < _m; i++)
             {
